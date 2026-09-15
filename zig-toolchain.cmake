@@ -1,0 +1,247 @@
+set(ZIG_VERSION "0.16.0")
+set(ZIG_DIR "${CMAKE_CURRENT_LIST_DIR}/vendor/zig")
+set(ZIG_BIN "${CMAKE_BINARY_DIR}")
+
+if(${CMAKE_HOST_SYSTEM_NAME} STREQUAL "Darwin")
+    set(ZIG_HOST_OS "macos")
+elseif(${CMAKE_HOST_SYSTEM_NAME} STREQUAL "Linux")
+    set(ZIG_HOST_OS "linux")
+else()
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_HOST_SYSTEM_NAME}")
+endif()
+
+if(NOT DEFINED TARGET)
+    message(FATAL_ERROR "zig-toolchain: TARGET is required, e.g. -DTARGET=arm-linux-gnueabihf-cortex_a7-neon-o3")
+endif()
+
+set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES TARGET)
+
+set(ZIG_TARGET_TRIPLE "")
+set(ZIG_TARGET_CPU "")
+set(ZIG_TARGET_FPU "")
+set(ZIG_TARGET_OPT "")
+set(ZIG_TARGET_ARGS "")
+set(ZIG_TARGET_FLAG "-DTARGET=${TARGET}")
+
+set(ZIG_TARGET "${TARGET}")
+
+if(ZIG_TARGET MATCHES "-o([0-9]+)$")
+    set(ZIG_TARGET_OPT "${CMAKE_MATCH_1}")
+    string(REGEX REPLACE "-o[0-9]+$" "" ZIG_TARGET "${ZIG_TARGET}")
+endif()
+
+string(REPLACE "-" ";" TARGET_PARTS "${ZIG_TARGET}")
+list(LENGTH TARGET_PARTS TARGET_LEN)
+
+if(TARGET_LEN GREATER 4)
+    list(GET TARGET_PARTS -1 ZIG_TARGET_FPU)
+    list(REMOVE_AT TARGET_PARTS -1)
+endif()
+
+if(TARGET_LEN GREATER 3)
+    list(SUBLIST TARGET_PARTS 3 -1 TARGET_EXTRAS)
+    list(SUBLIST TARGET_PARTS 0 3 TARGET_PARTS)
+    foreach(TARGET_EXTRA IN LISTS TARGET_EXTRAS)
+        if(ZIG_TARGET_CPU STREQUAL "")
+            set(ZIG_TARGET_CPU "${TARGET_EXTRA}")
+        else()
+            set(ZIG_TARGET_CPU "${ZIG_TARGET_CPU}+${TARGET_EXTRA}")
+        endif()
+    endforeach()
+endif()
+
+string(REPLACE ";" "-" ZIG_TARGET_TRIPLE "${TARGET_PARTS}")
+#string(REPLACE "gnueabi." "gnueabi" ZIG_TARGET_TRIPLE "${ZIG_TARGET_TRIPLE}")
+
+string(FIND "${ZIG_TARGET_TRIPLE}" "64" ZIG_TARGET_IS64_POS)
+if(ZIG_TARGET_IS64_POS GREATER -1)
+    set(ZIG_HOST_ARCH "x86_64")
+else()
+    set(ZIG_HOST_ARCH "x86")
+endif()
+set(ZIG_HOST_TARGET "${ZIG_HOST_ARCH}-${ZIG_HOST_OS}-musl")
+
+set(ZIG_TARGET_ARGS "-target ${ZIG_TARGET_TRIPLE}")
+
+if(ZIG_TARGET_CPU)
+    set(ZIG_TARGET_ARGS "${ZIG_TARGET_ARGS} -mcpu=${ZIG_TARGET_CPU}")
+endif()
+
+if(ZIG_TARGET_FPU)
+    set(ZIG_TARGET_ARGS "${ZIG_TARGET_ARGS} -mfpu=${ZIG_TARGET_FPU}")
+endif()
+
+if(ZIG_TARGET_OPT)
+    set(ZIG_TARGET_ARGS "${ZIG_TARGET_ARGS} -O${ZIG_TARGET_OPT}")
+endif()
+set(ZIG_TARGET_TRIPLE "${ZIG_TARGET_TRIPLE}" CACHE STRING "" FORCE)
+set(ZIG_TARGET_CPU "${ZIG_TARGET_CPU}" CACHE STRING "" FORCE)
+set(ZIG_TARGET_FPU "${ZIG_TARGET_FPU}" CACHE STRING "" FORCE)
+set(ZIG_TARGET_ARGS "${ZIG_TARGET_ARGS}" CACHE STRING "" FORCE)
+set(ZIG_HOST_TARGET "${ZIG_HOST_TARGET}" CACHE STRING "" FORCE)
+
+if(NOT EXISTS "${ZIG_BIN}/zig-cc")
+    file(MAKE_DIRECTORY "${ZIG_DIR}")
+    file(MAKE_DIRECTORY "${ZIG_BIN}")
+
+    if(NOT CMAKE_HOST_SYSTEM_PROCESSOR)
+        execute_process(
+            COMMAND uname -m
+            OUTPUT_VARIABLE ARCH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(ARCH)
+            set(CMAKE_HOST_SYSTEM_PROCESSOR "${ARCH}")
+        else()
+            message(WARNING "host system processor not detected. Defaulting to x86_64")
+            set(CMAKE_HOST_SYSTEM_PROCESSOR "x86_64")
+        endif()
+    endif()
+    set(ZIG_NAME "zig-${CMAKE_HOST_SYSTEM_PROCESSOR}-${ZIG_HOST_OS}-${ZIG_VERSION}")
+    set(ZIG_TAR "${ZIG_DIR}/${ZIG_NAME}.tar.xz")
+    set(ZIG_DOWNLOAD "https://ziglang.org/download/${ZIG_VERSION}/${ZIG_NAME}.tar.xz")
+
+    if(NOT EXISTS "${ZIG_TAR}" AND NOT EXISTS "${ZIG_DIR}/${ZIG_NAME}")
+        file(DOWNLOAD
+            "${ZIG_DOWNLOAD}"
+            "${ZIG_TAR}"
+            SHOW_PROGRESS
+            STATUS download_status
+            LOG log
+        )
+        list(GET download_status 0 status_code)
+        if(NOT status_code EQUAL 0)
+            message(FATAL_ERROR "failed downloading zig: ${log}")
+        endif()
+    endif()
+
+    if(NOT EXISTS "${ZIG_DIR}/${ZIG_NAME}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar xJf "${ZIG_TAR}"
+            WORKING_DIRECTORY "${ZIG_DIR}"
+            RESULT_VARIABLE tar_result
+        )
+        if(NOT tar_result EQUAL 0)
+            message(FATAL_ERROR "failed extracting zig")
+        endif()
+
+        file(REMOVE "${ZIG_TAR}")
+    endif()
+
+    find_program(ZIG_EXECUTABLE zig PATHS "${ZIG_DIR}/${ZIG_NAME}" REQUIRED NO_DEFAULT_PATH)
+
+    function(create_zig_script name cmd extra)
+        file(WRITE "${ZIG_BIN}/${name}" "#!/bin/sh\n\"${ZIG_EXECUTABLE}\" ${cmd} ${extra} \"\$@\"\n")
+        file(CHMOD "${ZIG_BIN}/${name}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    endfunction()
+
+    set(ZIG_NO_SANITIZE "-fno-sanitize=all -fno-sanitize-recover=all")
+    create_zig_script(zig-cc cc "${ZIG_TARGET_ARGS} ${ZIG_NO_SANITIZE}")
+    create_zig_script(zig-cxx c++ "${ZIG_TARGET_ARGS} ${ZIG_NO_SANITIZE}")
+    create_zig_script(zig-cc-host cc "${ZIG_NO_SANITIZE}")
+    create_zig_script(zig-cxx-host c++ "${ZIG_NO_SANITIZE}")
+    create_zig_script(zig-ar ar "")
+    create_zig_script(zig-ranlib ranlib "")
+endif()
+
+set(ZIG_GOOS "")
+set(ZIG_GOARCH "")
+set(ZIG_GOARM "")
+if(DEFINED TARGET)
+    set(_zig_go_target "${TARGET}")
+    string(REGEX REPLACE "-o[0-9]+$" "" _zig_go_target "${_zig_go_target}")
+    string(REPLACE "-" ";" _zig_go_parts "${_zig_go_target}")
+    list(LENGTH _zig_go_parts _zig_go_len)
+
+    unset(_zig_go_cpu)
+    unset(_zig_go_fpu)
+
+    if(_zig_go_len GREATER 4)
+        list(GET _zig_go_parts -1 _zig_go_fpu)
+        list(REMOVE_AT _zig_go_parts -1)
+    endif()
+    if(_zig_go_len GREATER 3)
+        list(GET _zig_go_parts -1 _zig_go_cpu)
+        list(REMOVE_AT _zig_go_parts -1)
+    endif()
+
+    list(GET _zig_go_parts 0 _zig_go_arch)
+    list(GET _zig_go_parts 1 _zig_go_os)
+    list(GET _zig_go_parts 2 _zig_go_abi)
+
+    if(_zig_go_arch STREQUAL "x86_64")
+        set(ZIG_GOARCH "amd64")
+    elseif(_zig_go_arch STREQUAL "aarch64")
+        set(ZIG_GOARCH "arm64")
+    elseif(_zig_go_arch STREQUAL "arm")
+        set(ZIG_GOARCH "arm")
+    elseif(_zig_go_arch MATCHES "^i[3-6]86$")
+        set(ZIG_GOARCH "386")
+    elseif(_zig_go_arch STREQUAL "riscv64")
+        set(ZIG_GOARCH "riscv64")
+    else()
+        set(ZIG_GOARCH "${_zig_go_arch}")
+    endif()
+
+    if(_zig_go_os STREQUAL "macos")
+        set(ZIG_GOOS "darwin")
+    else()
+        set(ZIG_GOOS "${_zig_go_os}")
+    endif()
+
+    if(ZIG_GOARCH STREQUAL "arm")
+        if(_zig_go_cpu MATCHES "^(arm926ej_s|arm920t|arm922t|arm940t|arm9tdmi|sa1100)$")
+            set(ZIG_GOARM "5")
+        elseif(_zig_go_cpu MATCHES "^(arm1176jzf_s|arm1136j_s|arm1136jf_s|arm11mpcore|mpcore)$")
+            set(ZIG_GOARM "6")
+        elseif(_zig_go_cpu MATCHES "^cortex_a")
+            set(ZIG_GOARM "7")
+        elseif(_zig_go_abi STREQUAL "gnueabihf")
+            set(ZIG_GOARM "7")
+        else()
+            set(ZIG_GOARM "5")
+        endif()
+    endif()
+endif()
+
+set(CMAKE_C_COMPILER "${ZIG_BIN}/zig-cc" CACHE FILEPATH "C compiler")
+set(CMAKE_CXX_COMPILER "${ZIG_BIN}/zig-cxx" CACHE FILEPATH "C++ compiler")
+set(CMAKE_AR "${ZIG_BIN}/zig-ar" CACHE FILEPATH "Archiver")
+set(CMAKE_RANLIB "${ZIG_BIN}/zig-ranlib" CACHE FILEPATH "Ranlib")
+set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_C_COMPILER> -r <OBJECTS> -o <TARGET>")
+set(CMAKE_C_ARCHIVE_FINISH "")
+set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> -r <OBJECTS> -o <TARGET>")
+set(CMAKE_CXX_ARCHIVE_FINISH "")
+
+set(CMAKE_C_STANDARD_DEFAULT 17)
+set(CMAKE_C_COMPILE_FEATURES c_std_90 c_std_99 c_std_11 c_std_17 c_std_23)
+set(CMAKE_C90_STANDARD_COMPILE_OPTION  "-std=c90")
+set(CMAKE_C90_EXTENSION_COMPILE_OPTION "-std=gnu90")
+set(CMAKE_C99_STANDARD_COMPILE_OPTION  "-std=c99")
+set(CMAKE_C99_EXTENSION_COMPILE_OPTION "-std=gnu99")
+set(CMAKE_C11_STANDARD_COMPILE_OPTION  "-std=c11")
+set(CMAKE_C11_EXTENSION_COMPILE_OPTION "-std=gnu11")
+set(CMAKE_C17_STANDARD_COMPILE_OPTION  "-std=c17")
+set(CMAKE_C17_EXTENSION_COMPILE_OPTION "-std=gnu17")
+set(CMAKE_C23_STANDARD_COMPILE_OPTION  "-std=c23")
+set(CMAKE_C23_EXTENSION_COMPILE_OPTION "-std=gnu23")
+
+set(CMAKE_CXX_STANDARD_DEFAULT 17)
+set(CMAKE_CXX_COMPILE_FEATURES cxx_std_98 cxx_std_11 cxx_std_14 cxx_std_17 cxx_std_20 cxx_std_23)
+set(CMAKE_CXX98_STANDARD_COMPILE_OPTION  "-std=c++98")
+set(CMAKE_CXX98_EXTENSION_COMPILE_OPTION "-std=gnu++98")
+set(CMAKE_CXX11_STANDARD_COMPILE_OPTION  "-std=c++11")
+set(CMAKE_CXX11_EXTENSION_COMPILE_OPTION "-std=gnu++11")
+set(CMAKE_CXX14_STANDARD_COMPILE_OPTION  "-std=c++14")
+set(CMAKE_CXX14_EXTENSION_COMPILE_OPTION "-std=gnu++14")
+set(CMAKE_CXX17_STANDARD_COMPILE_OPTION  "-std=c++17")
+set(CMAKE_CXX17_EXTENSION_COMPILE_OPTION "-std=gnu++17")
+set(CMAKE_CXX20_STANDARD_COMPILE_OPTION  "-std=c++20")
+set(CMAKE_CXX20_EXTENSION_COMPILE_OPTION "-std=gnu++20")
+set(CMAKE_CXX23_STANDARD_COMPILE_OPTION  "-std=c++23")
+set(CMAKE_CXX23_EXTENSION_COMPILE_OPTION "-std=gnu++23")
+
+set(CMAKE_C_LINK_GROUP_USING_RESCAN_SUPPORTED   TRUE)
+set(CMAKE_C_LINK_GROUP_USING_RESCAN   "-Wl,--start-group" "-Wl,--end-group")
+set(CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED TRUE)
+set(CMAKE_CXX_LINK_GROUP_USING_RESCAN "-Wl,--start-group" "-Wl,--end-group")

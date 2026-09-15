@@ -1,2 +1,2 @@
 # ports
-Lightweight game ports for low-resource and embedded consoles.
+> Lightweight game ports for low-resource and embedded consoles.
