@@ -1,4 +1,4 @@
-#include "shim.h"
+#include "sdl2.h"
 
 #include <SDL_vulkan.h>
 

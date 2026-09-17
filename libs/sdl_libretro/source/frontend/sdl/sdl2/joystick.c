@@ -1,4 +1,4 @@
-#include "shim.h"
+#include "sdl2.h"
 
 #define PAD_INDEX    0
 #define PAD_INSTANCE 1

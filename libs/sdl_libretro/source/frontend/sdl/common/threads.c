@@ -3,7 +3,11 @@
 #include <errno.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
+
+#include <SDL.h>
 
 #include "shim.h"
 
@@ -36,23 +40,55 @@ void SDL_DestroyMutex(SDL_mutex *mutex) {
     free(mutex);
 }
 
+static int mutex_lock(SDL_mutex *mutex) {
+    if (!mutex) {
+        shim_set_error("passed a NULL mutex");
+        return -1;
+    }
+    if (pthread_mutex_lock(&mutex->handle) != 0) {
+        shim_set_error("pthread_mutex_lock failed");
+        return -1;
+    }
+    return 0;
+}
+
+static int mutex_unlock(SDL_mutex *mutex) {
+    if (!mutex) {
+        shim_set_error("passed a NULL mutex");
+        return -1;
+    }
+    if (pthread_mutex_unlock(&mutex->handle) != 0) {
+        shim_set_error("pthread_mutex_unlock failed");
+        return -1;
+    }
+    return 0;
+}
+
+#if SDL_MAJOR_VERSION >= 2
 int SDL_LockMutex(SDL_mutex *mutex) {
-    if (!mutex) return SDL_SetError("passed a NULL mutex");
-    return pthread_mutex_lock(&mutex->handle) == 0 ? 0 : SDL_SetError("pthread_mutex_lock failed");
+    return mutex_lock(mutex);
+}
+
+int SDL_UnlockMutex(SDL_mutex *mutex) {
+    return mutex_unlock(mutex);
 }
 
 int SDL_TryLockMutex(SDL_mutex *mutex) {
     if (!mutex) return SDL_SetError("passed a NULL mutex");
     int rc = pthread_mutex_trylock(&mutex->handle);
-    if (rc == 0)      return 0;
-    if (rc == EBUSY)  return SDL_MUTEX_TIMEDOUT;
+    if (rc == 0)     return 0;
+    if (rc == EBUSY) return SDL_MUTEX_TIMEDOUT;
     return SDL_SetError("pthread_mutex_trylock failed");
 }
-
-int SDL_UnlockMutex(SDL_mutex *mutex) {
-    if (!mutex) return SDL_SetError("passed a NULL mutex");
-    return pthread_mutex_unlock(&mutex->handle) == 0 ? 0 : SDL_SetError("pthread_mutex_unlock failed");
+#else
+int SDL_mutexP(SDL_mutex *mutex) {
+    return mutex_lock(mutex);
 }
+
+int SDL_mutexV(SDL_mutex *mutex) {
+    return mutex_unlock(mutex);
+}
+#endif
 
 struct SDL_cond {
     pthread_cond_t handle;
@@ -84,24 +120,34 @@ void SDL_DestroyCond(SDL_cond *cond) {
 }
 
 int SDL_CondSignal(SDL_cond *cond) {
-    if (!cond) return SDL_SetError("passed a NULL condition variable");
-    return pthread_cond_signal(&cond->handle) == 0 ? 0 : SDL_SetError("pthread_cond_signal failed");
+    if (!cond) {
+        shim_set_error("passed a NULL condition variable");
+        return -1;
+    }
+    return pthread_cond_signal(&cond->handle) == 0 ? 0 : -1;
 }
 
 int SDL_CondBroadcast(SDL_cond *cond) {
-    if (!cond) return SDL_SetError("passed a NULL condition variable");
-    return pthread_cond_broadcast(&cond->handle) == 0 ? 0 : SDL_SetError("pthread_cond_broadcast failed");
+    if (!cond) {
+        shim_set_error("passed a NULL condition variable");
+        return -1;
+    }
+    return pthread_cond_broadcast(&cond->handle) == 0 ? 0 : -1;
 }
 
 int SDL_CondWait(SDL_cond *cond, SDL_mutex *mutex) {
-    if (!cond)  return SDL_SetError("passed a NULL condition variable");
-    if (!mutex) return SDL_SetError("passed a NULL mutex");
-    return pthread_cond_wait(&cond->handle, &mutex->handle) == 0 ? 0 : SDL_SetError("pthread_cond_wait failed");
+    if (!cond || !mutex) {
+        shim_set_error("passed a NULL condition variable or mutex");
+        return -1;
+    }
+    return pthread_cond_wait(&cond->handle, &mutex->handle) == 0 ? 0 : -1;
 }
 
 int SDL_CondWaitTimeout(SDL_cond *cond, SDL_mutex *mutex, Uint32 ms) {
-    if (!cond)  return SDL_SetError("passed a NULL condition variable");
-    if (!mutex) return SDL_SetError("passed a NULL mutex");
+    if (!cond || !mutex) {
+        shim_set_error("passed a NULL condition variable or mutex");
+        return -1;
+    }
     if (ms == SDL_MUTEX_MAXWAIT) return SDL_CondWait(cond, mutex);
 
     struct timespec deadline;
@@ -116,7 +162,8 @@ int SDL_CondWaitTimeout(SDL_cond *cond, SDL_mutex *mutex, Uint32 ms) {
     int rc = pthread_cond_timedwait(&cond->handle, &mutex->handle, &deadline);
     if (rc == 0)         return 0;
     if (rc == ETIMEDOUT) return SDL_MUTEX_TIMEDOUT;
-    return SDL_SetError("pthread_cond_timedwait failed");
+    shim_set_error("pthread_cond_timedwait failed");
+    return -1;
 }
 
 struct SDL_semaphore {
@@ -144,121 +191,61 @@ void SDL_DestroySemaphore(SDL_sem *sem) {
 }
 
 int SDL_SemWait(SDL_sem *sem) {
-    if (!sem) return SDL_SetError("passed a NULL semaphore");
+    if (!sem) {
+        shim_set_error("passed a NULL semaphore");
+        return -1;
+    }
     while (sem_wait(&sem->handle) != 0) {
-        if (errno != EINTR) return SDL_SetError("sem_wait failed");
+        if (errno != EINTR) {
+            shim_set_error("sem_wait failed");
+            return -1;
+        }
     }
     return 0;
 }
 
 int SDL_SemTryWait(SDL_sem *sem) {
-    if (!sem) return SDL_SetError("passed a NULL semaphore");
+    if (!sem) {
+        shim_set_error("passed a NULL semaphore");
+        return -1;
+    }
     if (sem_trywait(&sem->handle) == 0) return 0;
-    return errno == EAGAIN ? SDL_MUTEX_TIMEDOUT : SDL_SetError("sem_trywait failed");
+    if (errno == EAGAIN) return SDL_MUTEX_TIMEDOUT;
+    shim_set_error("sem_trywait failed");
+    return -1;
 }
 
 int SDL_SemWaitTimeout(SDL_sem *sem, Uint32 ms) {
-    if (!sem) return SDL_SetError("passed a NULL semaphore");
+    if (!sem) {
+        shim_set_error("passed a NULL semaphore");
+        return -1;
+    }
     if (ms == SDL_MUTEX_MAXWAIT) return SDL_SemWait(sem);
 
     uint64_t deadline = shim_now_ms() + ms;
     for (;;) {
         if (sem_trywait(&sem->handle) == 0) return 0;
-        if (errno != EAGAIN && errno != EINTR) return SDL_SetError("sem_trywait failed");
+        if (errno != EAGAIN && errno != EINTR) {
+            shim_set_error("sem_trywait failed");
+            return -1;
+        }
         if (shim_now_ms() >= deadline) return SDL_MUTEX_TIMEDOUT;
         SDL_Delay(1);
     }
 }
 
 int SDL_SemPost(SDL_sem *sem) {
-    if (!sem) return SDL_SetError("passed a NULL semaphore");
-    return sem_post(&sem->handle) == 0 ? 0 : SDL_SetError("sem_post failed");
+    if (!sem) {
+        shim_set_error("passed a NULL semaphore");
+        return -1;
+    }
+    return sem_post(&sem->handle) == 0 ? 0 : -1;
 }
 
 Uint32 SDL_SemValue(SDL_sem *sem) {
     int value = 0;
     if (!sem || sem_getvalue(&sem->handle, &value) != 0 || value < 0) return 0;
     return (Uint32)value;
-}
-
-struct SDL_Thread {
-    pthread_t         handle;
-    SDL_ThreadFunction fn;
-    void              *data;
-    int                status;
-    bool               detached;
-    char               name[64];
-};
-
-static void *thread_trampoline(void *arg) {
-    SDL_Thread *thread = arg;
-    if (thread->name[0]) pthread_setname_np(pthread_self(), thread->name);
-    thread->status = thread->fn(thread->data);
-    if (thread->detached) free(thread);
-    return NULL;
-}
-
-SDL_Thread *SDL_CreateThreadWithStackSize(SDL_ThreadFunction fn, const char *name,
-                                          const size_t stacksize, void *data) {
-    if (!fn) {
-        shim_set_error("passed a NULL thread function");
-        return NULL;
-    }
-    SDL_Thread *thread = calloc(1, sizeof(*thread));
-    if (!thread) {
-        shim_set_error("out of memory");
-        return NULL;
-    }
-    thread->fn   = fn;
-    thread->data = data;
-    if (name) snprintf(thread->name, sizeof(thread->name), "%s", name);
-
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    if (stacksize > 0) pthread_attr_setstacksize(&attr, stacksize);
-    int rc = pthread_create(&thread->handle, &attr, thread_trampoline, thread);
-    pthread_attr_destroy(&attr);
-
-    if (rc != 0) {
-        shim_set_error("pthread_create failed: %s", strerror(rc));
-        free(thread);
-        return NULL;
-    }
-    return thread;
-}
-
-SDL_Thread *SDL_CreateThread(SDL_ThreadFunction fn, const char *name, void *data) {
-    return SDL_CreateThreadWithStackSize(fn, name, 0, data);
-}
-
-void SDL_WaitThread(SDL_Thread *thread, int *status) {
-    if (!thread) return;
-    pthread_join(thread->handle, NULL);
-    if (status) *status = thread->status;
-    free(thread);
-}
-
-void SDL_DetachThread(SDL_Thread *thread) {
-    if (!thread) return;
-    thread->detached = true;
-    pthread_detach(thread->handle);
-}
-
-const char *SDL_GetThreadName(SDL_Thread *thread) {
-    return (thread && thread->name[0]) ? thread->name : NULL;
-}
-
-SDL_threadID SDL_GetThreadID(SDL_Thread *thread) {
-    return (SDL_threadID)(thread ? thread->handle : pthread_self());
-}
-
-SDL_threadID SDL_ThreadID(void) {
-    return (SDL_threadID)pthread_self();
-}
-
-int SDL_SetThreadPriority(SDL_ThreadPriority priority) {
-    (void)priority;
-    return 0;
 }
 
 void *SDL_LoadObject(const char *sofile) {

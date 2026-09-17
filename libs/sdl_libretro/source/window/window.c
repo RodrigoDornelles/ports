@@ -1,7 +1,11 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "shim.h"
+#include "window.h"
 #include "capture.h"
 
 #include <EGL/egl.h>
@@ -155,28 +159,25 @@ typedef EGLDisplay (*PFN_eglGetPlatformDisplayEXT_t)(EGLenum, void *, const EGLi
 EGL_FOREACH(EGL_DECL)
 #undef EGL_DECL
 
-#define GL_ATTR_COUNT 32
-
-struct SDL_Cursor {
+struct win_cursor {
     XCursor xcursor;
     bool    owned;
 };
 
-struct SDL_Window {
-    Uint32     id;
-    Uint32     flags;
+struct win_window {
     int        x, y, w, h;
-    int        min_w, min_h;
-    char       title[256];
     XWindow    xwin;
     EGLConfig  config;
     EGLSurface surface;
     bool       mapped;
+    bool       opengl;
 };
 
 static struct {
     bool        ready;
     bool        failed;
+    bool        egl_ready;
+    bool        egl_failed;
     bool        has_x;
     bool        x11_keys;
     bool        create_context_ext;
@@ -188,8 +189,8 @@ static struct {
     bool        grabbed;
     void       *lib_xcursor;
     XCursor     invisible;
-    SDL_Cursor *cursor;
-    SDL_Cursor  default_cursor;
+    win_cursor *cursor;
+    win_cursor  default_cursor;
     void       *lib_x11;
     void       *lib_egl;
     void       *lib_gl;
@@ -200,32 +201,39 @@ static struct {
     XAtom       net_wm_fullscreen;
     EGLDisplay  edpy;
     EGLContext  current;
-    SDL_Window *window;
-    Uint32      next_id;
+    win_window *window;
     int         swap_interval;
-    int         attrs[GL_ATTR_COUNT];
-} v = { .next_id = 1, .swap_interval = 1, .cursor_shown = true };
+    int         attrs[WIN_GL_ATTR_COUNT];
+} v = { .swap_interval = 1, .cursor_shown = true };
 
-static bool video_init(void);
 static void cursor_apply(void);
 
 static void attrs_reset(void) {
     memset(v.attrs, 0, sizeof(v.attrs));
-    v.attrs[SDL_GL_RED_SIZE]              = 8;
-    v.attrs[SDL_GL_GREEN_SIZE]            = 8;
-    v.attrs[SDL_GL_BLUE_SIZE]             = 8;
-    v.attrs[SDL_GL_ALPHA_SIZE]            = 0;
-    v.attrs[SDL_GL_DEPTH_SIZE]            = 16;
-    v.attrs[SDL_GL_STENCIL_SIZE]          = 0;
-    v.attrs[SDL_GL_DOUBLEBUFFER]          = 1;
-    v.attrs[SDL_GL_CONTEXT_MAJOR_VERSION] = 2;
-    v.attrs[SDL_GL_CONTEXT_MINOR_VERSION] = 1;
-    v.attrs[SDL_GL_CONTEXT_PROFILE_MASK]  = 0;
+    v.attrs[WIN_GL_RED_SIZE]              = 8;
+    v.attrs[WIN_GL_GREEN_SIZE]            = 8;
+    v.attrs[WIN_GL_BLUE_SIZE]             = 8;
+    v.attrs[WIN_GL_ALPHA_SIZE]            = 0;
+    v.attrs[WIN_GL_DEPTH_SIZE]            = 16;
+    v.attrs[WIN_GL_STENCIL_SIZE]          = 0;
+    v.attrs[WIN_GL_DOUBLEBUFFER]          = 1;
+    v.attrs[WIN_GL_CONTEXT_MAJOR_VERSION] = 2;
+    v.attrs[WIN_GL_CONTEXT_MINOR_VERSION] = 1;
+    v.attrs[WIN_GL_CONTEXT_PROFILE_MASK]  = 0;
 }
 
 static bool x11_load(void) {
     v.lib_x11 = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
     if (!v.lib_x11) return false;
+
+    /* our own fake libX11 means there is no server to talk to, and letting two
+       shims share one IPC socket would only end in a fight over it */
+    if (dlsym(v.lib_x11, "x11_state")) {
+        dlclose(v.lib_x11);
+        v.lib_x11 = NULL;
+        return false;
+    }
+
 #define X_LOAD(ret, name, args) \
     p_##name = (ret (*) args)dlsym(v.lib_x11, #name); \
     if (!p_##name) { shim_set_error("libX11 missing %s", #name); return false; }
@@ -266,7 +274,7 @@ static EGLDisplay egl_display_open(void) {
     return p_eglGetDisplay(EGL_DEFAULT_DISPLAY);
 }
 
-static bool video_init(void) {
+bool win_init(void) {
     if (v.ready) return true;
     if (v.failed) return false;
 
@@ -275,10 +283,10 @@ static bool video_init(void) {
         v.attrs_set = true;
     }
 
-    v.sync_after_swap = getenv(DOPO_SDL2_ENV_SYNC) != NULL;
+    v.sync_after_swap = getenv(DOPO_ENV_SYNC) != NULL;
 
-    const char *native = getenv(DOPO_SDL2_ENV_NATIVE);
-    const char *keys   = getenv(DOPO_SDL2_ENV_X11KEYS);
+    const char *native = getenv(DOPO_ENV_NATIVE);
+    const char *keys   = getenv(DOPO_ENV_X11KEYS);
     bool want_x = native ? (strcmp(native, "x11") == 0) : (getenv("DISPLAY") != NULL);
     v.x11_keys = (keys && keys[0] == '1') || getenv(DOPO_IPC_ENV_SOCKET) == NULL;
     v.synthetic_focus = !v.x11_keys;
@@ -294,21 +302,32 @@ static bool video_init(void) {
         }
     }
 
+    fprintf(stderr, SHIM_TAG " video ready: %s\n", v.has_x ? "x11" : "native");
+    v.ready = true;
+    return true;
+}
+
+/* EGL only gets loaded once something actually asks for OpenGL, so a software
+   only frontend still runs on a device without any GL driver installed */
+bool win_gl_init(void) {
+    if (v.egl_ready) return true;
+    if (v.egl_failed || !win_init()) return false;
+
     if (!egl_load()) {
-        v.failed = true;
+        v.egl_failed = true;
         return false;
     }
 
     v.edpy = egl_display_open();
     if (v.edpy == EGL_NO_DISPLAY) {
         shim_set_error("eglGetDisplay failed (0x%x)", p_eglGetError());
-        v.failed = true;
+        v.egl_failed = true;
         return false;
     }
     EGLint major = 0, minor = 0;
     if (!p_eglInitialize(v.edpy, &major, &minor)) {
         shim_set_error("eglInitialize failed (0x%x)", p_eglGetError());
-        v.failed = true;
+        v.egl_failed = true;
         return false;
     }
 
@@ -316,70 +335,120 @@ static bool video_init(void) {
     v.create_context_ext = (major > 1 || (major == 1 && minor >= 5))
                         || (exts && strstr(exts, "EGL_KHR_create_context"));
 
-    fprintf(stderr, "[libSDL2-shim] video ready: %s, EGL %d.%d, %s\n",
-            v.has_x ? "x11" : "native", major, minor,
+    fprintf(stderr, SHIM_TAG " EGL %d.%d ready, %s\n", major, minor,
             p_eglQueryString(v.edpy, EGL_VENDOR));
-    v.ready = true;
+    v.egl_ready = true;
     return true;
 }
 
-static void desktop_size(int *w, int *h) {
+bool win_has_x(void) {
+    return v.has_x;
+}
+
+bool win_synthetic_focus(void) {
+    return v.synthetic_focus;
+}
+
+const char *win_driver(void) {
+    return v.has_x ? "x11" : DOPO_DRIVER;
+}
+
+void win_desktop_size(int *w, int *h) {
     if (v.has_x) {
         *w = p_XDisplayWidth(v.dpy, v.screen);
         *h = p_XDisplayHeight(v.dpy, v.screen);
         return;
     }
-    const char *ew = getenv("DOPO_SDL2_WIDTH");
-    const char *eh = getenv("DOPO_SDL2_HEIGHT");
+    const char *ew = getenv(DOPO_ENV_WIDTH);
+    const char *eh = getenv(DOPO_ENV_HEIGHT);
     *w = ew ? atoi(ew) : 1920;
     *h = eh ? atoi(eh) : 1080;
     if (*w <= 0) *w = 1920;
     if (*h <= 0) *h = 1080;
 }
 
-uint32_t shim_window_id(void) {
-    return v.window ? v.window->id : 0;
+int win_display_dpi(float *dpi) {
+    if (!win_init()) return -1;
+    float value = 96.0f;
+    if (v.has_x) {
+        int mm = p_XDisplayWidthMM(v.dpy, v.screen);
+        int px = p_XDisplayWidth(v.dpy, v.screen);
+        if (mm > 0 && px > 0) value = (float)px / ((float)mm / 25.4f);
+    }
+    if (dpi) *dpi = value;
+    return 0;
 }
 
-static bool x11_keysym_to_sdl(XKeySym ks, uint16_t *scancode, uint32_t *keycode) {
-    if (ks >= 'a' && ks <= 'z') { *scancode = (uint16_t)(SDL_SCANCODE_A + (ks - 'a')); *keycode = (uint32_t)ks; return true; }
-    if (ks >= 'A' && ks <= 'Z') { *scancode = (uint16_t)(SDL_SCANCODE_A + (ks - 'A')); *keycode = (uint32_t)(ks + 32); return true; }
-    if (ks >= '1' && ks <= '9') { *scancode = (uint16_t)(SDL_SCANCODE_1 + (ks - '1')); *keycode = (uint32_t)ks; return true; }
-    if (ks == '0')              { *scancode = SDL_SCANCODE_0; *keycode = '0'; return true; }
+/* SDL2 scancodes, the wire format the core speaks */
+#define KEY_A          4
+#define KEY_1         30
+#define KEY_0         39
+#define KEY_RETURN    40
+#define KEY_ESCAPE    41
+#define KEY_BACKSPACE 42
+#define KEY_TAB       43
+#define KEY_SPACE     44
+#define KEY_F1        58
+#define KEY_HOME      74
+#define KEY_PAGEUP    75
+#define KEY_DELETE    76
+#define KEY_END       77
+#define KEY_PAGEDOWN  78
+#define KEY_RIGHT     79
+#define KEY_LEFT      80
+#define KEY_DOWN      81
+#define KEY_UP        82
+#define KEY_INSERT    73
+#define KEY_LCTRL    224
+#define KEY_LSHIFT   225
+#define KEY_LALT     226
+#define KEY_RCTRL    228
+#define KEY_RSHIFT   229
+#define KEY_RALT     230
+
+/* SDL2 keycodes for the keys above the ASCII range */
+#define SYM_SCANCODE_MASK (1 << 30)
+#define SYM(scancode)     ((uint32_t)(scancode) | SYM_SCANCODE_MASK)
+
+static bool keysym_translate(XKeySym ks, uint16_t *scancode, uint32_t *keycode) {
+    if (ks >= 'a' && ks <= 'z') { *scancode = (uint16_t)(KEY_A + (ks - 'a')); *keycode = (uint32_t)ks; return true; }
+    if (ks >= 'A' && ks <= 'Z') { *scancode = (uint16_t)(KEY_A + (ks - 'A')); *keycode = (uint32_t)(ks + 32); return true; }
+    if (ks >= '1' && ks <= '9') { *scancode = (uint16_t)(KEY_1 + (ks - '1')); *keycode = (uint32_t)ks; return true; }
+    if (ks == '0')              { *scancode = KEY_0; *keycode = '0'; return true; }
     if (ks >= 0xffbe && ks <= 0xffc9) {
-        *scancode = (uint16_t)(SDL_SCANCODE_F1 + (ks - 0xffbe));
-        *keycode  = (uint32_t)(SDLK_F1 + (ks - 0xffbe));
+        *scancode = (uint16_t)(KEY_F1 + (ks - 0xffbe));
+        *keycode  = SYM(KEY_F1 + (ks - 0xffbe));
         return true;
     }
     switch (ks) {
-        case 0x0020: *scancode = SDL_SCANCODE_SPACE;     *keycode = SDLK_SPACE;     return true;
-        case 0xff0d: *scancode = SDL_SCANCODE_RETURN;    *keycode = SDLK_RETURN;    return true;
-        case 0xff1b: *scancode = SDL_SCANCODE_ESCAPE;    *keycode = SDLK_ESCAPE;    return true;
-        case 0xff08: *scancode = SDL_SCANCODE_BACKSPACE; *keycode = SDLK_BACKSPACE; return true;
-        case 0xff09: *scancode = SDL_SCANCODE_TAB;       *keycode = SDLK_TAB;       return true;
-        case 0xff52: *scancode = SDL_SCANCODE_UP;        *keycode = SDLK_UP;        return true;
-        case 0xff54: *scancode = SDL_SCANCODE_DOWN;      *keycode = SDLK_DOWN;      return true;
-        case 0xff51: *scancode = SDL_SCANCODE_LEFT;      *keycode = SDLK_LEFT;      return true;
-        case 0xff53: *scancode = SDL_SCANCODE_RIGHT;     *keycode = SDLK_RIGHT;     return true;
-        case 0xff50: *scancode = SDL_SCANCODE_HOME;      *keycode = SDLK_HOME;      return true;
-        case 0xff57: *scancode = SDL_SCANCODE_END;       *keycode = SDLK_END;       return true;
-        case 0xff55: *scancode = SDL_SCANCODE_PAGEUP;    *keycode = SDLK_PAGEUP;    return true;
-        case 0xff56: *scancode = SDL_SCANCODE_PAGEDOWN;  *keycode = SDLK_PAGEDOWN;  return true;
-        case 0xff63: *scancode = SDL_SCANCODE_INSERT;    *keycode = SDLK_INSERT;    return true;
-        case 0xffff: *scancode = SDL_SCANCODE_DELETE;    *keycode = SDLK_DELETE;    return true;
-        case 0xffe1: *scancode = SDL_SCANCODE_LSHIFT;    *keycode = SDLK_LSHIFT;    return true;
-        case 0xffe2: *scancode = SDL_SCANCODE_RSHIFT;    *keycode = SDLK_RSHIFT;    return true;
-        case 0xffe3: *scancode = SDL_SCANCODE_LCTRL;     *keycode = SDLK_LCTRL;     return true;
-        case 0xffe4: *scancode = SDL_SCANCODE_RCTRL;     *keycode = SDLK_RCTRL;     return true;
-        case 0xffe9: *scancode = SDL_SCANCODE_LALT;      *keycode = SDLK_LALT;      return true;
-        case 0xffea: *scancode = SDL_SCANCODE_RALT;      *keycode = SDLK_RALT;      return true;
+        case 0x0020: *scancode = KEY_SPACE;     *keycode = ' ';                 return true;
+        case 0xff0d: *scancode = KEY_RETURN;    *keycode = '\r';                return true;
+        case 0xff1b: *scancode = KEY_ESCAPE;    *keycode = '\033';              return true;
+        case 0xff08: *scancode = KEY_BACKSPACE; *keycode = '\b';                return true;
+        case 0xff09: *scancode = KEY_TAB;       *keycode = '\t';                return true;
+        case 0xff52: *scancode = KEY_UP;        *keycode = SYM(KEY_UP);         return true;
+        case 0xff54: *scancode = KEY_DOWN;      *keycode = SYM(KEY_DOWN);       return true;
+        case 0xff51: *scancode = KEY_LEFT;      *keycode = SYM(KEY_LEFT);       return true;
+        case 0xff53: *scancode = KEY_RIGHT;     *keycode = SYM(KEY_RIGHT);      return true;
+        case 0xff50: *scancode = KEY_HOME;      *keycode = SYM(KEY_HOME);       return true;
+        case 0xff57: *scancode = KEY_END;       *keycode = SYM(KEY_END);        return true;
+        case 0xff55: *scancode = KEY_PAGEUP;    *keycode = SYM(KEY_PAGEUP);     return true;
+        case 0xff56: *scancode = KEY_PAGEDOWN;  *keycode = SYM(KEY_PAGEDOWN);   return true;
+        case 0xff63: *scancode = KEY_INSERT;    *keycode = SYM(KEY_INSERT);     return true;
+        case 0xffff: *scancode = KEY_DELETE;    *keycode = '\177';              return true;
+        case 0xffe1: *scancode = KEY_LSHIFT;    *keycode = SYM(KEY_LSHIFT);     return true;
+        case 0xffe2: *scancode = KEY_RSHIFT;    *keycode = SYM(KEY_RSHIFT);     return true;
+        case 0xffe3: *scancode = KEY_LCTRL;     *keycode = SYM(KEY_LCTRL);      return true;
+        case 0xffe4: *scancode = KEY_RCTRL;     *keycode = SYM(KEY_RCTRL);      return true;
+        case 0xffe9: *scancode = KEY_LALT;      *keycode = SYM(KEY_LALT);       return true;
+        case 0xffea: *scancode = KEY_RALT;      *keycode = SYM(KEY_RALT);       return true;
         default:     return false;
     }
 }
 
-void shim_video_pump(void) {
+void win_pump(void) {
     if (!v.has_x || !v.window) return;
-    SDL_Window *win = v.window;
+    win_window *win = v.window;
 
     while (p_XPending(v.dpy) > 0) {
         XEventRaw ev;
@@ -387,14 +456,7 @@ void shim_video_pump(void) {
         switch (ev.type) {
             case X_ClientMessage: {
                 XClientMessageEventRaw *cm = (XClientMessageEventRaw *)&ev;
-                if ((XAtom)cm->data.l[0] == v.wm_delete) {
-                    shim_events_window(SDL_WINDOWEVENT_CLOSE, 0, 0);
-                    SDL_Event q;
-                    memset(&q, 0, sizeof(q));
-                    q.type = SDL_QUIT;
-                    q.quit.timestamp = SDL_GetTicks();
-                    shim_events_push(&q);
-                }
+                if ((XAtom)cm->data.l[0] == v.wm_delete) win_on_close();
                 break;
             }
             case X_ConfigureNotify: {
@@ -402,39 +464,33 @@ void shim_video_pump(void) {
                 if (ce->width != win->w || ce->height != win->h) {
                     win->w = ce->width;
                     win->h = ce->height;
-                    shim_events_window(SDL_WINDOWEVENT_SIZE_CHANGED, win->w, win->h);
-                    shim_events_window(SDL_WINDOWEVENT_RESIZED, win->w, win->h);
                     shim_ipc_send(DOPO_IPC_PKT_WINDOW, 0, (uint16_t)win->w, (uint32_t)win->h);
                     capture_resize(win->w, win->h);
+                    win_on_resize(win->w, win->h);
                 }
                 if (!ce->send_event && (ce->x != win->x || ce->y != win->y)) {
                     win->x = ce->x;
                     win->y = ce->y;
-                    shim_events_window(SDL_WINDOWEVENT_MOVED, win->x, win->y);
+                    win_on_move(win->x, win->y);
                 }
                 break;
             }
             case X_Expose:
-                shim_events_window(SDL_WINDOWEVENT_EXPOSED, 0, 0);
+                win_on_expose();
                 break;
             case X_FocusIn:
-                if (v.synthetic_focus) break;
-                win->flags |= SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_MOUSE_FOCUS;
-                shim_events_window(SDL_WINDOWEVENT_FOCUS_GAINED, 0, 0);
+                if (!v.synthetic_focus) win_on_focus(true);
                 break;
             case X_FocusOut:
-                if (v.synthetic_focus) break;
-                win->flags &= ~(Uint32)(SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_MOUSE_FOCUS);
-                shim_events_window(SDL_WINDOWEVENT_FOCUS_LOST, 0, 0);
+                if (!v.synthetic_focus) win_on_focus(false);
                 break;
             case X_MapNotify:
                 win->mapped = true;
-                win->flags |= SDL_WINDOW_SHOWN;
-                shim_events_window(SDL_WINDOWEVENT_SHOWN, 0, 0);
+                win_on_map(true);
                 break;
             case X_UnmapNotify:
                 win->mapped = false;
-                shim_events_window(SDL_WINDOWEVENT_HIDDEN, 0, 0);
+                win_on_map(false);
                 break;
             case X_KeyPress:
             case X_KeyRelease: {
@@ -442,7 +498,7 @@ void shim_video_pump(void) {
                 XKeyEventRaw *ke = (XKeyEventRaw *)&ev;
                 uint16_t scancode;
                 uint32_t keycode;
-                if (x11_keysym_to_sdl(p_XLookupKeysym(ke, 0), &scancode, &keycode)) {
+                if (keysym_translate(p_XLookupKeysym(ke, 0), &scancode, &keycode)) {
                     shim_events_key(scancode, keycode, ev.type == X_KeyPress);
                 }
                 break;
@@ -453,12 +509,12 @@ void shim_video_pump(void) {
     }
 }
 
-int SDL_GL_SetAttribute(SDL_GLattr attr, int value) {
+int win_gl_set_attribute(win_gl_attr_t attr, int value) {
     if (!v.attrs_set) {
         attrs_reset();
         v.attrs_set = true;
     }
-    if ((int)attr < 0 || (int)attr >= GL_ATTR_COUNT) {
+    if ((int)attr < 0 || (int)attr >= WIN_GL_ATTR_COUNT) {
         shim_set_error("unknown GL attribute %d", (int)attr);
         return -1;
     }
@@ -466,31 +522,31 @@ int SDL_GL_SetAttribute(SDL_GLattr attr, int value) {
     return 0;
 }
 
-int SDL_GL_GetAttribute(SDL_GLattr attr, int *value) {
-    if ((int)attr < 0 || (int)attr >= GL_ATTR_COUNT || !value) return -1;
+int win_gl_get_attribute(win_gl_attr_t attr, int *value) {
+    if ((int)attr < 0 || (int)attr >= WIN_GL_ATTR_COUNT || !value) return -1;
     *value = v.attrs[attr];
-    if (v.window && v.window->config) {
+    if (v.egl_ready && v.window && v.window->config) {
         EGLint q = 0;
         switch (attr) {
-            case SDL_GL_RED_SIZE:     p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_RED_SIZE,     &q); *value = q; break;
-            case SDL_GL_GREEN_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_GREEN_SIZE,   &q); *value = q; break;
-            case SDL_GL_BLUE_SIZE:    p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_BLUE_SIZE,    &q); *value = q; break;
-            case SDL_GL_ALPHA_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_ALPHA_SIZE,   &q); *value = q; break;
-            case SDL_GL_DEPTH_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_DEPTH_SIZE,   &q); *value = q; break;
-            case SDL_GL_STENCIL_SIZE: p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_STENCIL_SIZE, &q); *value = q; break;
+            case WIN_GL_RED_SIZE:     p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_RED_SIZE,     &q); *value = q; break;
+            case WIN_GL_GREEN_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_GREEN_SIZE,   &q); *value = q; break;
+            case WIN_GL_BLUE_SIZE:    p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_BLUE_SIZE,    &q); *value = q; break;
+            case WIN_GL_ALPHA_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_ALPHA_SIZE,   &q); *value = q; break;
+            case WIN_GL_DEPTH_SIZE:   p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_DEPTH_SIZE,   &q); *value = q; break;
+            case WIN_GL_STENCIL_SIZE: p_eglGetConfigAttrib(v.edpy, v.window->config, EGL_STENCIL_SIZE, &q); *value = q; break;
             default: break;
         }
     }
     return 0;
 }
 
-void SDL_GL_ResetAttributes(void) {
+void win_gl_reset_attributes(void) {
     attrs_reset();
     v.attrs_set = true;
 }
 
 static bool is_es(void) {
-    return (v.attrs[SDL_GL_CONTEXT_PROFILE_MASK] & SDL_GL_CONTEXT_PROFILE_ES) != 0;
+    return (v.attrs[WIN_GL_CONTEXT_PROFILE_MASK] & WIN_GL_PROFILE_ES) != 0;
 }
 
 static EGLConfig config_choose(bool strict) {
@@ -502,23 +558,23 @@ static EGLConfig config_choose(bool strict) {
     attribs[n++] = EGL_SURFACE_TYPE;
     attribs[n++] = EGL_WINDOW_BIT;
     attribs[n++] = EGL_RED_SIZE;
-    attribs[n++] = v.attrs[SDL_GL_RED_SIZE];
+    attribs[n++] = v.attrs[WIN_GL_RED_SIZE];
     attribs[n++] = EGL_GREEN_SIZE;
-    attribs[n++] = v.attrs[SDL_GL_GREEN_SIZE];
+    attribs[n++] = v.attrs[WIN_GL_GREEN_SIZE];
     attribs[n++] = EGL_BLUE_SIZE;
-    attribs[n++] = v.attrs[SDL_GL_BLUE_SIZE];
+    attribs[n++] = v.attrs[WIN_GL_BLUE_SIZE];
     if (strict) {
         attribs[n++] = EGL_ALPHA_SIZE;
-        attribs[n++] = v.attrs[SDL_GL_ALPHA_SIZE];
+        attribs[n++] = v.attrs[WIN_GL_ALPHA_SIZE];
         attribs[n++] = EGL_DEPTH_SIZE;
-        attribs[n++] = v.attrs[SDL_GL_DEPTH_SIZE];
+        attribs[n++] = v.attrs[WIN_GL_DEPTH_SIZE];
         attribs[n++] = EGL_STENCIL_SIZE;
-        attribs[n++] = v.attrs[SDL_GL_STENCIL_SIZE];
-        if (v.attrs[SDL_GL_MULTISAMPLEBUFFERS]) {
+        attribs[n++] = v.attrs[WIN_GL_STENCIL_SIZE];
+        if (v.attrs[WIN_GL_MULTISAMPLEBUFFERS]) {
             attribs[n++] = EGL_SAMPLE_BUFFERS;
             attribs[n++] = 1;
             attribs[n++] = EGL_SAMPLES;
-            attribs[n++] = v.attrs[SDL_GL_MULTISAMPLESAMPLES];
+            attribs[n++] = v.attrs[WIN_GL_MULTISAMPLESAMPLES];
         }
     } else {
         attribs[n++] = EGL_DEPTH_SIZE;
@@ -542,7 +598,7 @@ static EGLConfig config_choose(bool strict) {
     return configs[0];
 }
 
-static bool surface_create(SDL_Window *win) {
+static bool surface_create(win_window *win) {
     win->config = config_choose(true);
     if (!win->config) win->config = config_choose(false);
     if (!win->config) {
@@ -562,24 +618,24 @@ static bool surface_create(SDL_Window *win) {
     return true;
 }
 
-static void surface_destroy(SDL_Window *win) {
-    if (win->surface == EGL_NO_SURFACE || !win->surface) return;
+static void surface_destroy(win_window *win) {
+    if (!v.egl_ready || win->surface == EGL_NO_SURFACE || !win->surface) return;
     p_eglMakeCurrent(v.edpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     p_eglDestroySurface(v.edpy, win->surface);
     win->surface = EGL_NO_SURFACE;
 }
 
-SDL_GLContext SDL_GL_CreateContext(SDL_Window *window) {
-    if (!window || !window->surface) {
+void *win_gl_create_context(win_window *window) {
+    if (!v.egl_ready || !window || !window->surface) {
         shim_set_error("window has no OpenGL surface");
         return NULL;
     }
 
     EGLint attribs[16];
     int    n     = 0;
-    int    major = v.attrs[SDL_GL_CONTEXT_MAJOR_VERSION];
-    int    minor = v.attrs[SDL_GL_CONTEXT_MINOR_VERSION];
-    int    flags = v.attrs[SDL_GL_CONTEXT_FLAGS];
+    int    major = v.attrs[WIN_GL_CONTEXT_MAJOR_VERSION];
+    int    minor = v.attrs[WIN_GL_CONTEXT_MINOR_VERSION];
+    int    flags = v.attrs[WIN_GL_CONTEXT_FLAGS];
 
     if (is_es()) {
         attribs[n++] = EGL_CONTEXT_CLIENT_VERSION;
@@ -591,22 +647,22 @@ SDL_GLContext SDL_GL_CreateContext(SDL_Window *window) {
         attribs[n++] = minor;
         if (major >= 3) {
             attribs[n++] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
-            attribs[n++] = (v.attrs[SDL_GL_CONTEXT_PROFILE_MASK] & SDL_GL_CONTEXT_PROFILE_CORE)
+            attribs[n++] = (v.attrs[WIN_GL_CONTEXT_PROFILE_MASK] & WIN_GL_PROFILE_CORE)
                          ? EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT
                          : EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
         }
-        if (flags & SDL_GL_CONTEXT_DEBUG_FLAG) {
+        if (flags & WIN_GL_CONTEXT_DEBUG) {
             attribs[n++] = EGL_CONTEXT_OPENGL_DEBUG;
             attribs[n++] = EGL_TRUE;
         }
-        if (flags & SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG) {
+        if (flags & WIN_GL_CONTEXT_FORWARD_COMPATIBLE) {
             attribs[n++] = EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE;
             attribs[n++] = EGL_TRUE;
         }
     }
     attribs[n++] = EGL_NONE;
 
-    EGLContext share = v.attrs[SDL_GL_SHARE_WITH_CURRENT_CONTEXT] && v.current ? v.current : EGL_NO_CONTEXT;
+    EGLContext share = v.attrs[WIN_GL_SHARE_WITH_CURRENT_CONTEXT] && v.current ? v.current : EGL_NO_CONTEXT;
     EGLContext ctx   = p_eglCreateContext(v.edpy, window->config, share, attribs);
     if (ctx == EGL_NO_CONTEXT) {
         shim_set_error("eglCreateContext %d.%d failed (0x%x)", major, minor, p_eglGetError());
@@ -623,15 +679,15 @@ SDL_GLContext SDL_GL_CreateContext(SDL_Window *window) {
         v.lib_gl = dlopen(is_es() ? "libGLESv2.so.2" : "libGL.so.1", RTLD_LAZY | RTLD_GLOBAL);
     }
     if (v.sync_after_swap && !v.gl_finish) {
-        v.gl_finish = (void (*)(void))SDL_GL_GetProcAddress("glFinish");
-        fprintf(stderr, "[libSDL2-shim] sync after swap %s\n", v.gl_finish ? "on" : "unavailable");
+        v.gl_finish = (void (*)(void))win_gl_proc_address("glFinish");
+        fprintf(stderr, SHIM_TAG " sync after swap %s\n", v.gl_finish ? "on" : "unavailable");
     }
-    fprintf(stderr, "[libSDL2-shim] GL context %d.%d created (%s)\n", major, minor, is_es() ? "GLES" : "GL");
-    return (SDL_GLContext)ctx;
+    fprintf(stderr, SHIM_TAG " GL context %d.%d created (%s)\n", major, minor, is_es() ? "GLES" : "GL");
+    return (void *)ctx;
 }
 
-int SDL_GL_MakeCurrent(SDL_Window *window, SDL_GLContext context) {
-    if (!v.ready) return -1;
+int win_gl_make_current(win_window *window, void *context) {
+    if (!v.egl_ready) return -1;
     EGLSurface surf = (window && window->surface) ? window->surface : EGL_NO_SURFACE;
     if (!p_eglMakeCurrent(v.edpy, surf, surf, (EGLContext)context)) {
         shim_set_error("eglMakeCurrent failed (0x%x)", p_eglGetError());
@@ -641,8 +697,8 @@ int SDL_GL_MakeCurrent(SDL_Window *window, SDL_GLContext context) {
     return 0;
 }
 
-void SDL_GL_DeleteContext(SDL_GLContext context) {
-    if (!v.ready || !context) return;
+void win_gl_delete_context(void *context) {
+    if (!v.egl_ready || !context) return;
     if (v.current == (EGLContext)context) {
         p_eglMakeCurrent(v.edpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         v.current = EGL_NO_CONTEXT;
@@ -650,41 +706,37 @@ void SDL_GL_DeleteContext(SDL_GLContext context) {
     p_eglDestroyContext(v.edpy, (EGLContext)context);
 }
 
-SDL_GLContext SDL_GL_GetCurrentContext(void) {
-    return (SDL_GLContext)v.current;
+void *win_gl_current_context(void) {
+    return (void *)v.current;
 }
 
-SDL_Window *SDL_GL_GetCurrentWindow(void) {
-    return v.window;
-}
-
-void SDL_GL_SwapWindow(SDL_Window *window) {
-    if (!window || !window->surface) return;
+void win_gl_swap(win_window *window) {
+    if (!v.egl_ready || !window || !window->surface) return;
     capture_frame();
     p_eglSwapBuffers(v.edpy, window->surface);
 
     if (v.sync_after_swap && v.gl_finish) v.gl_finish();
 }
 
-int SDL_GL_SetSwapInterval(int interval) {
-    if (!v.ready) return -1;
+int win_gl_set_swap_interval(int interval) {
+    if (!v.egl_ready) return -1;
     if (interval < 0) interval = 1;
     if (!p_eglSwapInterval(v.edpy, interval)) {
-        fprintf(stderr, "[libSDL2-shim] eglSwapInterval(%d) failed (0x%x); frames may queue up\n",
+        fprintf(stderr, SHIM_TAG " eglSwapInterval(%d) failed (0x%x); frames may queue up\n",
                 interval, p_eglGetError());
         shim_set_error("eglSwapInterval failed (0x%x)", p_eglGetError());
         return -1;
     }
-    fprintf(stderr, "[libSDL2-shim] swap interval %d\n", interval);
+    fprintf(stderr, SHIM_TAG " swap interval %d\n", interval);
     v.swap_interval = interval;
     return 0;
 }
 
-int SDL_GL_GetSwapInterval(void) {
+int win_gl_get_swap_interval(void) {
     return v.swap_interval;
 }
 
-void *SDL_GL_GetProcAddress(const char *proc) {
+void *win_gl_proc_address(const char *proc) {
     if (!proc) return NULL;
     void *p = NULL;
     if (p_eglGetProcAddress) p = p_eglGetProcAddress(proc);
@@ -706,27 +758,14 @@ void *SDL_GL_GetProcAddress(const char *proc) {
     return p;
 }
 
-int SDL_GL_LoadLibrary(const char *path) {
-    (void)path;
-    return video_init() ? 0 : -1;
-}
-
-void SDL_GL_UnloadLibrary(void) {
-}
-
-SDL_bool SDL_GL_ExtensionSupported(const char *extension) {
-    (void)extension;
-    return SDL_FALSE;
-}
-
-void SDL_GL_GetDrawableSize(SDL_Window *window, int *w, int *h) {
+void win_gl_drawable_size(win_window *window, int *w, int *h) {
     if (!window) {
         if (w) *w = 0;
         if (h) *h = 0;
         return;
     }
     EGLint sw = window->w, sh = window->h;
-    if (window->surface) {
+    if (v.egl_ready && window->surface) {
         p_eglQuerySurface(v.edpy, window->surface, EGL_WIDTH,  &sw);
         p_eglQuerySurface(v.edpy, window->surface, EGL_HEIGHT, &sh);
     }
@@ -734,7 +773,7 @@ void SDL_GL_GetDrawableSize(SDL_Window *window, int *w, int *h) {
     if (h) *h = sh;
 }
 
-static void x11_fullscreen(SDL_Window *win, bool enable) {
+static void x11_fullscreen(win_window *win, bool enable) {
     if (!v.has_x || !win->xwin) return;
     if (!win->mapped) {
         if (enable) {
@@ -760,45 +799,36 @@ static void x11_fullscreen(SDL_Window *win, bool enable) {
     p_XFlush(v.dpy);
 }
 
-SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags) {
-    if (!video_init()) return NULL;
+win_window *win_create(const win_config_t *cfg) {
+    if (!cfg || !win_init()) return NULL;
     if (v.window) {
         shim_set_error("only one window is supported");
         return NULL;
     }
 
-    SDL_Window *win = calloc(1, sizeof(*win));
-    if (!win) return NULL;
-
-    int dw, dh;
-    desktop_size(&dw, &dh);
-    if (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) {
-        w = dw;
-        h = dh;
+    win_window *win = calloc(1, sizeof(*win));
+    if (!win) {
+        shim_set_error("out of memory");
+        return NULL;
     }
-    if (w <= 0) w = 640;
-    if (h <= 0) h = 480;
-    if (SDL_WINDOWPOS_ISUNDEFINED(x) || SDL_WINDOWPOS_ISCENTERED(x)) x = (dw - w) / 2;
-    if (SDL_WINDOWPOS_ISUNDEFINED(y) || SDL_WINDOWPOS_ISCENTERED(y)) y = (dh - h) / 2;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
 
-    win->id    = v.next_id++;
-    win->flags = flags | SDL_WINDOW_SHOWN;
-    win->x = x; win->y = y;
-    win->w = w; win->h = h;
-    snprintf(win->title, sizeof(win->title), "%s", title ? title : "");
+    win->x      = cfg->x;
+    win->y      = cfg->y;
+    win->w      = cfg->w;
+    win->h      = cfg->h;
+    win->opengl = cfg->opengl;
 
     if (v.has_x) {
         XWindow root  = p_XDefaultRootWindow(v.dpy);
         unsigned long black = p_XBlackPixel(v.dpy, v.screen);
-        win->xwin = p_XCreateSimpleWindow(v.dpy, root, x, y, (unsigned)w, (unsigned)h, 0, black, black);
+        win->xwin = p_XCreateSimpleWindow(v.dpy, root, win->x, win->y,
+                                          (unsigned)win->w, (unsigned)win->h, 0, black, black);
         if (!win->xwin) {
             shim_set_error("XCreateSimpleWindow failed");
             free(win);
             return NULL;
         }
-        p_XStoreName(v.dpy, win->xwin, win->title);
+        p_XStoreName(v.dpy, win->xwin, cfg->title ? cfg->title : "");
         p_XSelectInput(v.dpy, win->xwin, X_StructureNotifyMask | X_ExposureMask | X_FocusChangeMask
                                          | X_KeyPressMask | X_KeyReleaseMask);
         p_XSetWMProtocols(v.dpy, win->xwin, &v.wm_delete, 1);
@@ -810,55 +840,48 @@ SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint
         hints.initial_state = X_NormalState;
         p_XSetWMHints(v.dpy, win->xwin, &hints);
 
-        if (flags & SDL_WINDOW_FULLSCREEN) x11_fullscreen(win, true);
-        if (!(flags & SDL_WINDOW_HIDDEN)) {
+        if (cfg->fullscreen) x11_fullscreen(win, true);
+        if (!cfg->hidden) {
             p_XMapRaised(v.dpy, win->xwin);
             win->mapped = true;
         }
         p_XSync(v.dpy, 0);
     }
 
-    if (flags & SDL_WINDOW_OPENGL) {
-        if (!surface_create(win)) {
-            if (win->xwin) p_XDestroyWindow(v.dpy, win->xwin);
-            free(win);
-            return NULL;
-        }
+    if (cfg->opengl && (!win_gl_init() || !surface_create(win))) {
+        if (win->xwin) p_XDestroyWindow(v.dpy, win->xwin);
+        free(win);
+        return NULL;
     }
 
     v.window = win;
     if (!v.cursor) v.cursor = &v.default_cursor;
     cursor_apply();
 
-    if (v.synthetic_focus) {
-        win->flags |= SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_MOUSE_FOCUS;
-        shim_events_window(SDL_WINDOWEVENT_SHOWN, 0, 0);
-        shim_events_window(SDL_WINDOWEVENT_FOCUS_GAINED, 0, 0);
-    }
-
-    shim_ipc_send(DOPO_IPC_PKT_WINDOW, 0, (uint16_t)w, (uint32_t)h);
-    capture_resize(w, h);
-    fprintf(stderr, "[libSDL2-shim] window %dx%d '%s' flags=0x%x\n", w, h, win->title, flags);
+    shim_ipc_send(DOPO_IPC_PKT_WINDOW, 0, (uint16_t)win->w, (uint32_t)win->h);
+    capture_resize(win->w, win->h);
+    fprintf(stderr, SHIM_TAG " window %dx%d '%s'%s\n", win->w, win->h,
+            cfg->title ? cfg->title : "", cfg->opengl ? " opengl" : "");
     return win;
 }
 
-void SDL_DestroyWindow(SDL_Window *window) {
-    if (!window) return;
-    surface_destroy(window);
-    if (v.has_x && window->xwin) {
-        p_XDestroyWindow(v.dpy, window->xwin);
+void win_destroy(win_window *win) {
+    if (!win) return;
+    surface_destroy(win);
+    if (v.has_x && win->xwin) {
+        p_XDestroyWindow(v.dpy, win->xwin);
         p_XFlush(v.dpy);
     }
-    if (v.window == window) v.window = NULL;
-    free(window);
+    if (v.window == win) v.window = NULL;
+    free(win);
 }
 
-void shim_video_quit(void) {
-    if (v.window) SDL_DestroyWindow(v.window);
+void win_quit(void) {
+    if (v.window) win_destroy(v.window);
     if (v.has_x && v.invisible) p_XFreeCursor(v.dpy, v.invisible);
     v.invisible = X_None;
     v.cursor    = NULL;
-    if (v.ready && v.edpy != EGL_NO_DISPLAY) {
+    if (v.egl_ready && v.edpy != EGL_NO_DISPLAY) {
         p_eglMakeCurrent(v.edpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         p_eglTerminate(v.edpy);
     }
@@ -866,148 +889,82 @@ void shim_video_quit(void) {
     v.edpy    = EGL_NO_DISPLAY;
     v.current = EGL_NO_CONTEXT;
     v.dpy     = NULL;
-    v.has_x   = false;
-    v.ready   = false;
-    v.failed  = false;
+    v.has_x      = false;
+    v.ready      = false;
+    v.failed     = false;
+    v.egl_ready  = false;
+    v.egl_failed = false;
 }
 
-void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
-    if (w) *w = window ? window->w : 0;
-    if (h) *h = window ? window->h : 0;
+void win_geometry(const win_window *win, int *x, int *y, int *w, int *h) {
+    if (x) *x = win ? win->x : 0;
+    if (y) *y = win ? win->y : 0;
+    if (w) *w = win ? win->w : 0;
+    if (h) *h = win ? win->h : 0;
 }
 
-void SDL_GetWindowPosition(SDL_Window *window, int *x, int *y) {
-    if (x) *x = window ? window->x : 0;
-    if (y) *y = window ? window->y : 0;
+void win_set_title(win_window *win, const char *title) {
+    if (!win || !v.has_x || !win->xwin) return;
+    p_XStoreName(v.dpy, win->xwin, title ? title : "");
+    p_XFlush(v.dpy);
 }
 
-void SDL_SetWindowSize(SDL_Window *window, int w, int h) {
-    if (!window || w <= 0 || h <= 0) return;
-    window->w = w;
-    window->h = h;
-    if (v.has_x && window->xwin) {
-        p_XResizeWindow(v.dpy, window->xwin, (unsigned)w, (unsigned)h);
+void win_set_size(win_window *win, int w, int h) {
+    if (!win || w <= 0 || h <= 0) return;
+    win->w = w;
+    win->h = h;
+    if (v.has_x && win->xwin) {
+        p_XResizeWindow(v.dpy, win->xwin, (unsigned)w, (unsigned)h);
         p_XFlush(v.dpy);
     }
 }
 
-void SDL_SetWindowPosition(SDL_Window *window, int x, int y) {
-    if (!window) return;
-    int dw, dh;
-    desktop_size(&dw, &dh);
-    if (SDL_WINDOWPOS_ISUNDEFINED(x) || SDL_WINDOWPOS_ISCENTERED(x)) x = (dw - window->w) / 2;
-    if (SDL_WINDOWPOS_ISUNDEFINED(y) || SDL_WINDOWPOS_ISCENTERED(y)) y = (dh - window->h) / 2;
-    window->x = x;
-    window->y = y;
-    if (v.has_x && window->xwin) {
-        p_XMoveWindow(v.dpy, window->xwin, x, y);
+void win_set_position(win_window *win, int x, int y) {
+    if (!win) return;
+    win->x = x;
+    win->y = y;
+    if (v.has_x && win->xwin) {
+        p_XMoveWindow(v.dpy, win->xwin, x, y);
         p_XFlush(v.dpy);
     }
 }
 
-void SDL_SetWindowTitle(SDL_Window *window, const char *title) {
-    if (!window) return;
-    snprintf(window->title, sizeof(window->title), "%s", title ? title : "");
-    if (v.has_x && window->xwin) {
-        p_XStoreName(v.dpy, window->xwin, window->title);
-        p_XFlush(v.dpy);
-    }
-}
-
-const char *SDL_GetWindowTitle(SDL_Window *window) {
-    return window ? window->title : "";
-}
-
-int SDL_SetWindowFullscreen(SDL_Window *window, Uint32 flags) {
-    if (!window) return -1;
-    bool enable = (flags & SDL_WINDOW_FULLSCREEN) != 0;
-    window->flags &= ~(Uint32)SDL_WINDOW_FULLSCREEN_DESKTOP;
-    window->flags |= flags & SDL_WINDOW_FULLSCREEN_DESKTOP;
-    x11_fullscreen(window, enable);
+void win_set_fullscreen(win_window *win, bool enable) {
+    if (!win) return;
+    x11_fullscreen(win, enable);
     if (!v.has_x && enable) {
         int dw, dh;
-        desktop_size(&dw, &dh);
-        window->w = dw;
-        window->h = dh;
-    }
-    return 0;
-}
-
-void SDL_SetWindowResizable(SDL_Window *window, SDL_bool resizable) {
-    if (!window) return;
-    if (resizable) window->flags |= SDL_WINDOW_RESIZABLE;
-    else           window->flags &= ~(Uint32)SDL_WINDOW_RESIZABLE;
-}
-
-void SDL_SetWindowMinimumSize(SDL_Window *window, int min_w, int min_h) {
-    if (!window) return;
-    window->min_w = min_w;
-    window->min_h = min_h;
-}
-
-void SDL_GetWindowMinimumSize(SDL_Window *window, int *w, int *h) {
-    if (w) *w = window ? window->min_w : 0;
-    if (h) *h = window ? window->min_h : 0;
-}
-
-void SDL_SetWindowBordered(SDL_Window *window, SDL_bool bordered) {
-    (void)window; (void)bordered;
-}
-
-void SDL_SetWindowIcon(SDL_Window *window, SDL_Surface *icon) {
-    (void)window; (void)icon;
-}
-
-void SDL_ShowWindow(SDL_Window *window) {
-    if (!window) return;
-    window->flags |= SDL_WINDOW_SHOWN;
-    if (v.has_x && window->xwin) {
-        p_XMapRaised(v.dpy, window->xwin);
-        p_XFlush(v.dpy);
+        win_desktop_size(&dw, &dh);
+        win->w = dw;
+        win->h = dh;
     }
 }
 
-void SDL_HideWindow(SDL_Window *window) {
-    if (!window) return;
-    window->flags &= ~(Uint32)SDL_WINDOW_SHOWN;
-    if (v.has_x && window->xwin) {
-        p_XUnmapWindow(v.dpy, window->xwin);
-        p_XFlush(v.dpy);
+void win_set_visible(win_window *win, bool visible) {
+    if (!win || !v.has_x || !win->xwin) return;
+    if (visible) p_XMapRaised(v.dpy, win->xwin);
+    else         p_XUnmapWindow(v.dpy, win->xwin);
+    p_XFlush(v.dpy);
+}
+
+void win_raise(win_window *win) {
+    if (!win || !v.has_x || !win->xwin) return;
+    p_XRaiseWindow(v.dpy, win->xwin);
+    p_XFlush(v.dpy);
+}
+
+void win_set_grab(win_window *win, bool grabbed) {
+    if (!win) return;
+    v.grabbed = grabbed;
+    if (!v.has_x || !win->xwin || !v.x11_keys) return;
+    if (grabbed) {
+        p_XGrabPointer(v.dpy, win->xwin, 1,
+                       X_PointerMotionMask | X_ButtonPressMask | X_ButtonReleaseMask,
+                       X_GrabModeAsync, X_GrabModeAsync, win->xwin, X_None, X_CurrentTime);
+    } else {
+        p_XUngrabPointer(v.dpy, X_CurrentTime);
     }
-}
-
-void SDL_RaiseWindow(SDL_Window *window) {
-    if (!window) return;
-    if (v.has_x && window->xwin) {
-        p_XRaiseWindow(v.dpy, window->xwin);
-        p_XFlush(v.dpy);
-    }
-}
-
-void SDL_MinimizeWindow(SDL_Window *window) { (void)window; }
-void SDL_MaximizeWindow(SDL_Window *window) { (void)window; }
-void SDL_RestoreWindow(SDL_Window *window)  { (void)window; }
-
-Uint32 SDL_GetWindowFlags(SDL_Window *window) {
-    return window ? window->flags : 0;
-}
-
-Uint32 SDL_GetWindowID(SDL_Window *window) {
-    return window ? window->id : 0;
-}
-
-SDL_Window *SDL_GetWindowFromID(Uint32 id) {
-    return (v.window && v.window->id == id) ? v.window : NULL;
-}
-
-int SDL_GetWindowDisplayIndex(SDL_Window *window) {
-    (void)window;
-    return 0;
-}
-
-Uint32 SDL_GetWindowPixelFormat(SDL_Window *window) {
-    (void)window;
-    return SDL_PIXELFORMAT_RGB888;
+    p_XFlush(v.dpy);
 }
 
 typedef struct {
@@ -1031,19 +988,18 @@ static bool xcursor_bind(void) {
     return xcursor.create && xcursor.load && xcursor.destroy;
 }
 
-static const unsigned k_system_cursors[SDL_NUM_SYSTEM_CURSORS] = {
-    [SDL_SYSTEM_CURSOR_ARROW]     = 68,
-    [SDL_SYSTEM_CURSOR_IBEAM]     = 152,
-    [SDL_SYSTEM_CURSOR_WAIT]      = 150,
-    [SDL_SYSTEM_CURSOR_CROSSHAIR] = 34,
-    [SDL_SYSTEM_CURSOR_WAITARROW] = 150,
-    [SDL_SYSTEM_CURSOR_SIZENWSE]  = 134,
-    [SDL_SYSTEM_CURSOR_SIZENESW]  = 136,
-    [SDL_SYSTEM_CURSOR_SIZEWE]    = 108,
-    [SDL_SYSTEM_CURSOR_SIZENS]    = 116,
-    [SDL_SYSTEM_CURSOR_SIZEALL]   = 52,
-    [SDL_SYSTEM_CURSOR_NO]        = 88,
-    [SDL_SYSTEM_CURSOR_HAND]      = 60,
+static const unsigned k_cursor_fonts[WIN_CURSOR_COUNT] = {
+    [WIN_CURSOR_ARROW]     = 68,
+    [WIN_CURSOR_IBEAM]     = 152,
+    [WIN_CURSOR_WAIT]      = 150,
+    [WIN_CURSOR_CROSSHAIR] = 34,
+    [WIN_CURSOR_SIZENWSE]  = 134,
+    [WIN_CURSOR_SIZENESW]  = 136,
+    [WIN_CURSOR_SIZEWE]    = 108,
+    [WIN_CURSOR_SIZENS]    = 116,
+    [WIN_CURSOR_SIZEALL]   = 52,
+    [WIN_CURSOR_NO]        = 88,
+    [WIN_CURSOR_HAND]      = 60,
 };
 
 static XCursor cursor_invisible(void) {
@@ -1068,53 +1024,34 @@ static void cursor_apply(void) {
     p_XFlush(v.dpy);
 }
 
-SDL_Cursor *SDL_CreateSystemCursor(SDL_SystemCursor id) {
-    if (!video_init()) return NULL;
-    SDL_Cursor *cursor = calloc(1, sizeof(*cursor));
+win_cursor *win_cursor_system(win_cursor_shape_t shape) {
+    if (!win_init()) return NULL;
+    win_cursor *cursor = calloc(1, sizeof(*cursor));
     if (!cursor) {
         shim_set_error("out of memory");
         return NULL;
     }
-    if (v.has_x && id >= 0 && id < SDL_NUM_SYSTEM_CURSORS) {
-        cursor->xcursor = p_XCreateFontCursor(v.dpy, k_system_cursors[id]);
+    if (v.has_x && shape >= 0 && shape < WIN_CURSOR_COUNT) {
+        cursor->xcursor = p_XCreateFontCursor(v.dpy, k_cursor_fonts[shape]);
         cursor->owned   = cursor->xcursor != X_None;
     }
     return cursor;
 }
 
-SDL_Cursor *SDL_CreateColorCursor(SDL_Surface *surface, int hot_x, int hot_y) {
-    if (!video_init()) return NULL;
-    SDL_Cursor *cursor = calloc(1, sizeof(*cursor));
+win_cursor *win_cursor_color(const uint32_t *argb, int w, int h, int hot_x, int hot_y) {
+    if (!win_init()) return NULL;
+    win_cursor *cursor = calloc(1, sizeof(*cursor));
     if (!cursor) {
         shim_set_error("out of memory");
         return NULL;
     }
-    if (!v.has_x || !surface || !surface->pixels || surface->format->BytesPerPixel != 4
-            || !xcursor_bind()) {
-        return cursor;
-    }
+    if (!v.has_x || !argb || w <= 0 || h <= 0 || !xcursor_bind()) return cursor;
 
-    XcursorImageRaw *image = xcursor.create(surface->w, surface->h);
+    XcursorImageRaw *image = xcursor.create(w, h);
     if (!image) return cursor;
     image->xhot = (unsigned)(hot_x < 0 ? 0 : hot_x);
     image->yhot = (unsigned)(hot_y < 0 ? 0 : hot_y);
-
-    const SDL_PixelFormat *fmt = surface->format;
-    for (int y = 0; y < surface->h; y++) {
-        const Uint32 *row = (const Uint32 *)((const Uint8 *)surface->pixels + (size_t)y * (size_t)surface->pitch);
-        for (int x = 0; x < surface->w; x++) {
-            Uint32 px = row[x];
-            Uint32 r  = fmt->Rmask ? ((px & fmt->Rmask) >> fmt->Rshift) << fmt->Rloss : 0;
-            Uint32 g  = fmt->Gmask ? ((px & fmt->Gmask) >> fmt->Gshift) << fmt->Gloss : 0;
-            Uint32 b  = fmt->Bmask ? ((px & fmt->Bmask) >> fmt->Bshift) << fmt->Bloss : 0;
-            Uint32 a  = fmt->Amask ? ((px & fmt->Amask) >> fmt->Ashift) << fmt->Aloss : 255;
-            r = r * a / 255;
-            g = g * a / 255;
-            b = b * a / 255;
-            image->pixels[(size_t)y * (size_t)surface->w + (size_t)x] =
-                (a << 24) | (r << 16) | (g << 8) | b;
-        }
-    }
+    memcpy(image->pixels, argb, (size_t)w * (size_t)h * sizeof(uint32_t));
 
     cursor->xcursor = xcursor.load(v.dpy, image);
     cursor->owned   = cursor->xcursor != X_None;
@@ -1122,20 +1059,7 @@ SDL_Cursor *SDL_CreateColorCursor(SDL_Surface *surface, int hot_x, int hot_y) {
     return cursor;
 }
 
-SDL_Cursor *SDL_GetDefaultCursor(void) {
-    return &v.default_cursor;
-}
-
-SDL_Cursor *SDL_GetCursor(void) {
-    return v.cursor ? v.cursor : &v.default_cursor;
-}
-
-void SDL_SetCursor(SDL_Cursor *cursor) {
-    if (cursor) v.cursor = cursor;
-    cursor_apply();
-}
-
-void SDL_FreeCursor(SDL_Cursor *cursor) {
+void win_cursor_free(win_cursor *cursor) {
     if (!cursor || cursor == &v.default_cursor) return;
     if (v.cursor == cursor) {
         v.cursor = &v.default_cursor;
@@ -1145,190 +1069,24 @@ void SDL_FreeCursor(SDL_Cursor *cursor) {
     free(cursor);
 }
 
-int SDL_ShowCursor(int toggle) {
-    int previous = v.cursor_shown ? SDL_ENABLE : SDL_DISABLE;
-    if (toggle < 0) return previous;
-    v.cursor_shown = toggle != SDL_DISABLE;
+void win_cursor_set(win_cursor *cursor) {
+    if (cursor) v.cursor = cursor;
     cursor_apply();
-    return previous;
 }
 
-void SDL_SetWindowGrab(SDL_Window *window, SDL_bool grabbed) {
-    if (!window) return;
-    v.grabbed = grabbed == SDL_TRUE;
-    if (grabbed) window->flags |= SDL_WINDOW_INPUT_GRABBED;
-    else         window->flags &= ~(Uint32)SDL_WINDOW_INPUT_GRABBED;
-
-    if (!v.has_x || !window->xwin || !v.x11_keys) return;
-    if (grabbed) {
-        p_XGrabPointer(v.dpy, window->xwin, 1,
-                       X_PointerMotionMask | X_ButtonPressMask | X_ButtonReleaseMask,
-                       X_GrabModeAsync, X_GrabModeAsync, window->xwin, X_None, X_CurrentTime);
-    } else {
-        p_XUngrabPointer(v.dpy, X_CurrentTime);
-    }
-    p_XFlush(v.dpy);
+win_cursor *win_cursor_default(void) {
+    return &v.default_cursor;
 }
 
-SDL_bool SDL_GetWindowGrab(SDL_Window *window) {
-    if (!window) return SDL_FALSE;
-    return (window->flags & SDL_WINDOW_INPUT_GRABBED) ? SDL_TRUE : SDL_FALSE;
+win_cursor *win_cursor_current(void) {
+    return v.cursor ? v.cursor : &v.default_cursor;
 }
 
-SDL_Window *SDL_GetGrabbedWindow(void) {
-    return v.grabbed ? v.window : NULL;
+void win_cursor_show(bool shown) {
+    v.cursor_shown = shown;
+    cursor_apply();
 }
 
-SDL_Window *SDL_GetKeyboardFocus(void) {
-    if (v.window && (v.window->flags & SDL_WINDOW_INPUT_FOCUS)) return v.window;
-    return NULL;
-}
-
-SDL_Window *SDL_GetMouseFocus(void) {
-    if (v.window && (v.window->flags & SDL_WINDOW_MOUSE_FOCUS)) return v.window;
-    return NULL;
-}
-
-static const int k_modes[][2] = {
-    { 3840, 2160 }, { 2560, 1440 }, { 1920, 1080 }, { 1600, 900 },
-    { 1366, 768 },  { 1280, 720 },  { 1024, 768 },  { 800, 600 }, { 640, 480 },
-};
-
-static void mode_fill(SDL_DisplayMode *mode, int w, int h) {
-    mode->format       = SDL_PIXELFORMAT_RGB888;
-    mode->w            = w;
-    mode->h            = h;
-    mode->refresh_rate = 60;
-    mode->driverdata   = NULL;
-}
-
-static int modes_build(SDL_DisplayMode *out, int cap) {
-    int dw, dh;
-    desktop_size(&dw, &dh);
-    int n = 0;
-    mode_fill(&out[n++], dw, dh);
-    for (size_t i = 0; i < sizeof(k_modes) / sizeof(*k_modes) && n < cap; i++) {
-        int w = k_modes[i][0], h = k_modes[i][1];
-        if (w > dw || h > dh || (w == dw && h == dh)) continue;
-        mode_fill(&out[n++], w, h);
-    }
-    return n;
-}
-
-int SDL_GetNumVideoDisplays(void) {
-    return video_init() ? 1 : 0;
-}
-
-const char *SDL_GetDisplayName(int displayIndex) {
-    (void)displayIndex;
-    return DOPO_DRIVER;
-}
-
-int SDL_GetDesktopDisplayMode(int displayIndex, SDL_DisplayMode *mode) {
-    (void)displayIndex;
-    if (!mode || !video_init()) return -1;
-    int dw, dh;
-    desktop_size(&dw, &dh);
-    mode_fill(mode, dw, dh);
-    return 0;
-}
-
-int SDL_GetCurrentDisplayMode(int displayIndex, SDL_DisplayMode *mode) {
-    return SDL_GetDesktopDisplayMode(displayIndex, mode);
-}
-
-int SDL_GetNumDisplayModes(int displayIndex) {
-    (void)displayIndex;
-    if (!video_init()) return -1;
-    SDL_DisplayMode modes[16];
-    return modes_build(modes, 16);
-}
-
-int SDL_GetDisplayMode(int displayIndex, int modeIndex, SDL_DisplayMode *mode) {
-    (void)displayIndex;
-    if (!mode || !video_init()) return -1;
-    SDL_DisplayMode modes[16];
-    int n = modes_build(modes, 16);
-    if (modeIndex < 0 || modeIndex >= n) {
-        shim_set_error("display mode index %d out of range", modeIndex);
-        return -1;
-    }
-    *mode = modes[modeIndex];
-    return 0;
-}
-
-SDL_DisplayMode *SDL_GetClosestDisplayMode(int displayIndex, const SDL_DisplayMode *mode, SDL_DisplayMode *closest) {
-    (void)displayIndex;
-    if (!mode || !closest) return NULL;
-    mode_fill(closest, mode->w, mode->h);
-    return closest;
-}
-
-int SDL_GetDisplayDPI(int displayIndex, float *ddpi, float *hdpi, float *vdpi) {
-    (void)displayIndex;
-    if (!video_init()) return -1;
-    float dpi = 96.0f;
-    if (v.has_x) {
-        int mm = p_XDisplayWidthMM(v.dpy, v.screen);
-        int px = p_XDisplayWidth(v.dpy, v.screen);
-        if (mm > 0 && px > 0) dpi = (float)px / ((float)mm / 25.4f);
-    }
-    if (ddpi) *ddpi = dpi;
-    if (hdpi) *hdpi = dpi;
-    if (vdpi) *vdpi = dpi;
-    return 0;
-}
-
-int SDL_GetDisplayBounds(int displayIndex, SDL_Rect *rect) {
-    (void)displayIndex;
-    if (!rect || !video_init()) return -1;
-    int dw, dh;
-    desktop_size(&dw, &dh);
-    rect->x = 0;
-    rect->y = 0;
-    rect->w = dw;
-    rect->h = dh;
-    return 0;
-}
-
-int SDL_GetDisplayUsableBounds(int displayIndex, SDL_Rect *rect) {
-    return SDL_GetDisplayBounds(displayIndex, rect);
-}
-
-SDL_DisplayOrientation SDL_GetDisplayOrientation(int displayIndex) {
-    (void)displayIndex;
-    return SDL_ORIENTATION_UNKNOWN;
-}
-
-int SDL_GetWindowDisplayMode(SDL_Window *window, SDL_DisplayMode *mode) {
-    if (!window || !mode) return -1;
-    mode_fill(mode, window->w, window->h);
-    return 0;
-}
-
-int SDL_SetWindowDisplayMode(SDL_Window *window, const SDL_DisplayMode *mode) {
-    (void)window; (void)mode;
-    return 0;
-}
-
-const char *SDL_GetCurrentVideoDriver(void) {
-    return v.has_x ? "x11" : DOPO_DRIVER;
-}
-
-int SDL_GetNumVideoDrivers(void) {
-    return 1;
-}
-
-const char *SDL_GetVideoDriver(int index) {
-    (void)index;
-    return SDL_GetCurrentVideoDriver();
-}
-
-int SDL_VideoInit(const char *driver_name) {
-    (void)driver_name;
-    return video_init() ? 0 : -1;
-}
-
-void SDL_VideoQuit(void) {
-    shim_video_quit();
+bool win_cursor_shown(void) {
+    return v.cursor_shown;
 }

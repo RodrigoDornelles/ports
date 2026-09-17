@@ -173,13 +173,13 @@ static void gptk_apply(const char *button, const char *value, int line) {
     entry_t *e = entry_find(button);
     if (!e) {
         if (!is_unsupported(button)) {
-            fprintf(stderr, "[sdl2] gptk:%d unknown button '%s'\n", line, button);
+            fprintf(stderr, "[dopo] gptk:%d unknown button '%s'\n", line, button);
         }
         return;
     }
 
     if (strncasecmp(value, "mouse", 5) == 0) {
-        fprintf(stderr, "[sdl2] gptk:%d '%s = %s': mouse not supported, staying on pad\n",
+        fprintf(stderr, "[dopo] gptk:%d '%s = %s': mouse not supported, staying on pad\n",
                 line, button, value);
         return;
     }
@@ -187,7 +187,7 @@ static void gptk_apply(const char *button, const char *value, int line) {
     uint16_t scancode = 0;
     uint32_t keycode  = 0;
     if (!key_resolve(value, &scancode, &keycode)) {
-        fprintf(stderr, "[sdl2] gptk:%d '%s = %s': unknown key, staying on pad\n",
+        fprintf(stderr, "[dopo] gptk:%d '%s = %s': unknown key, staying on pad\n",
                 line, button, value);
         return;
     }
@@ -200,7 +200,7 @@ static void gptk_apply(const char *button, const char *value, int line) {
 static bool gptk_load(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "[sdl2] gptk: cannot open %s\n", path);
+        fprintf(stderr, "[dopo] gptk: cannot open %s\n", path);
         return false;
     }
 
@@ -217,7 +217,7 @@ static bool gptk_load(const char *path) {
 
         char *eq = strchr(s, '=');
         if (!eq) {
-            fprintf(stderr, "[sdl2] gptk:%d ignored, no '=': %s\n", n, s);
+            fprintf(stderr, "[dopo] gptk:%d ignored, no '=': %s\n", n, s);
             continue;
         }
         *eq = '\0';
@@ -262,7 +262,7 @@ void keymap_configure(const char *exec_path) {
         char path[1024];
         path_resolve_rel(gptk, exec_path, path, sizeof(path));
         if (gptk_load(path)) {
-            fprintf(stderr, "[sdl2] gptk loaded: %s\n", path);
+            fprintf(stderr, "[dopo] gptk loaded: %s\n", path);
         }
     }
 
@@ -273,7 +273,7 @@ void keymap_configure(const char *exec_path) {
         uint16_t scancode = 0;
         uint32_t keycode  = 0;
         if (!key_resolve(want, &scancode, &keycode)) {
-            fprintf(stderr, "[sdl2] button '%s': unknown key '%s', staying on pad\n",
+            fprintf(stderr, "[dopo] button '%s': unknown key '%s', staying on pad\n",
                     s_map[i].core, want);
             continue;
         }
@@ -285,10 +285,10 @@ void keymap_configure(const char *exec_path) {
     if (debug) {
         for (size_t i = 0; i < MAP_COUNT; i++) {
             if (s_map[i].bind.kind == BIND_KEY) {
-                fprintf(stderr, "[sdl2]   %-6s -> key scancode=%u\n",
+                fprintf(stderr, "[dopo]   %-6s -> key scancode=%u\n",
                         s_map[i].core, s_map[i].bind.scancode);
             } else {
-                fprintf(stderr, "[sdl2]   %-6s -> pad %u\n",
+                fprintf(stderr, "[dopo]   %-6s -> pad %u\n",
                         s_map[i].core, s_map[i].bind.pad);
             }
         }

@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "core.h"
 #include "dopo.h"
@@ -18,7 +19,6 @@ static const struct retro_variable k_variables[] = {
     { "sdl_gptk",    "Keyboard mapping file; " },
     { "sdl_shim",    "Shim directory; " },
     { "sdl_format",  "Video output; rgba8888|rgb565|egl" },
-    { "sdl_preload", "Preload shim; enabled|disabled" },
     { NULL, NULL },
 };
 
@@ -87,4 +87,23 @@ void path_resolve_rel(const char *given, const char *base_file, char *out, size_
 
     if (given[0] == '.' && given[1] == '/') given += 2;
     snprintf(out, cap, "%s/%s", base, given);
+}
+
+bool path_which(const char *name, char *out, size_t cap) {
+    if (!name || !name[0] || !out || cap == 0) return false;
+
+    const char *path = getenv("PATH");
+    if (!path || !path[0]) return false;
+
+    char list[4096];
+    snprintf(list, sizeof(list), "%s", path);
+
+    for (char *dir = strtok(list, ":"); dir; dir = strtok(NULL, ":")) {
+        if (!dir[0]) continue;
+        int n = snprintf(out, cap, "%s/%s", dir, name);
+        if (n < 0 || (size_t)n >= cap) continue;
+        if (access(out, X_OK) == 0) return true;
+    }
+    out[0] = '\0';
+    return false;
 }

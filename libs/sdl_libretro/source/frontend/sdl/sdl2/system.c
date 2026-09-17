@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #include <dirent.h>
 
-#include "shim.h"
+#include "sdl2.h"
 
 static const struct {
     Uint32 format;

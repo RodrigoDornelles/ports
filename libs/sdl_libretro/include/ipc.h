@@ -5,13 +5,15 @@
 
 #include "dopo.h"
 
-#define DOPO_IPC_ENV_SOCKET  "DOPO_IPC_SOCKET"
-#define DOPO_SDL2_ENV_NATIVE  "DOPO_SDL2_NATIVE"
-#define DOPO_SDL2_ENV_X11KEYS "DOPO_SDL2_X11_KEYS"
-#define DOPO_ENV_DEBUG       "DOPO_DEBUG"
-#define DOPO_SDL2_ENV_SYNC   "DOPO_SDL2_SYNC"
-#define DOPO_SDL2_ENV_FORMAT "DOPO_SDL2_FORMAT"
-#define DOPO_SDL2_SHIM_NAME  "libSDL2-2.0.so.0"
+#define DOPO_IPC_ENV_SOCKET "DOPO_IPC_SOCKET"
+#define DOPO_ENV_DEBUG      "DOPO_DEBUG"
+#define DOPO_ENV_NATIVE     "DOPO_NATIVE"
+#define DOPO_ENV_X11KEYS    "DOPO_X11_KEYS"
+#define DOPO_ENV_SYNC       "DOPO_SYNC"
+#define DOPO_ENV_FORMAT     "DOPO_FORMAT"
+#define DOPO_ENV_WIDTH      "DOPO_WIDTH"
+#define DOPO_ENV_HEIGHT     "DOPO_HEIGHT"
+
 
 typedef enum __attribute__((packed)) {
     DOPO_IPC_PKT_NONE = 0,
@@ -29,6 +31,14 @@ typedef enum __attribute__((packed)) {
     DOPO_IPC_PKT_FB_INIT,
     DOPO_IPC_PKT_FB_FRAME,
 } dopo_ipc_pkt_type_t;
+
+/* which library the shim pretends to be, reported in the HELLO packet */
+typedef enum __attribute__((packed)) {
+    DOPO_IPC_API_OTHER = 0,
+    DOPO_IPC_API_SDL1,
+    DOPO_IPC_API_SDL2,
+    DOPO_IPC_API_X11,
+} dopo_ipc_api_t;
 
 typedef enum __attribute__((packed)) {
     DOPO_IPC_FORMAT_EGL = 0,

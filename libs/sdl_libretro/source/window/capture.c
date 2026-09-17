@@ -16,21 +16,21 @@
 typedef void (*PFN_glReadPixels)(int, int, int, int, unsigned, unsigned, void *);
 
 static struct {
-    bool                resolved;
+    bool              resolved;
     dopo_ipc_format_t format;
-    PFN_glReadPixels    read_pixels;
-    char                name[64];
-    int                 fd;
-    uint8_t            *map;
-    size_t              size;
-    int                 w;
-    int                 h;
-    uint8_t            *scratch;
+    PFN_glReadPixels  read_pixels;
+    char              name[64];
+    int               fd;
+    uint8_t          *map;
+    size_t            size;
+    int               w;
+    int               h;
+    uint8_t          *scratch;
 } c = { .fd = -1 };
 
 dopo_ipc_format_t capture_format(void) {
     if (!c.resolved) {
-        const char *want = getenv(DOPO_SDL2_ENV_FORMAT);
+        const char *want = getenv(DOPO_ENV_FORMAT);
         c.format = DOPO_IPC_FORMAT_EGL;
         if (want) {
             if (!strcmp(want, "rgba8888")) c.format = DOPO_IPC_FORMAT_RGBA8888;
@@ -61,8 +61,8 @@ static void unmap(void) {
 
 void capture_resize(int w, int h) {
     if (!capture_enabled()) {
-        fprintf(stderr, "[libSDL2-shim] capture off (%s=%s)\n", DOPO_SDL2_ENV_FORMAT,
-                getenv(DOPO_SDL2_ENV_FORMAT) ? getenv(DOPO_SDL2_ENV_FORMAT) : "unset");
+        fprintf(stderr, SHIM_TAG " capture off (%s=%s)\n", DOPO_ENV_FORMAT,
+                getenv(DOPO_ENV_FORMAT) ? getenv(DOPO_ENV_FORMAT) : "unset");
         return;
     }
     if (w <= 0 || h <= 0) return;
@@ -79,14 +79,14 @@ void capture_resize(int w, int h) {
 
     c.fd = shm_open(c.name, O_CREAT | O_RDWR | O_EXCL, 0600);
     if (c.fd < 0) {
-        fprintf(stderr, "[libSDL2-shim] shm_open %s failed\n", c.name);
+        fprintf(stderr, SHIM_TAG " shm_open %s failed\n", c.name);
         c.name[0] = '\0';
         return;
     }
 
     c.size = (size_t)w * (size_t)h * bytes_per_pixel();
     if (ftruncate(c.fd, (off_t)c.size) != 0) {
-        fprintf(stderr, "[libSDL2-shim] ftruncate %zu failed\n", c.size);
+        fprintf(stderr, SHIM_TAG " ftruncate %zu failed\n", c.size);
         unmap();
         return;
     }
@@ -94,14 +94,14 @@ void capture_resize(int w, int h) {
     c.map = mmap(NULL, c.size, PROT_READ | PROT_WRITE, MAP_SHARED, c.fd, 0);
     if (c.map == MAP_FAILED) {
         c.map = NULL;
-        fprintf(stderr, "[libSDL2-shim] mmap %zu failed\n", c.size);
+        fprintf(stderr, SHIM_TAG " mmap %zu failed\n", c.size);
         unmap();
         return;
     }
 
     c.scratch = malloc((size_t)w * (size_t)h * 4);
     if (!c.scratch) {
-        fprintf(stderr, "[libSDL2-shim] scratch alloc failed\n");
+        fprintf(stderr, SHIM_TAG " scratch alloc failed\n");
         unmap();
         return;
     }
@@ -110,7 +110,7 @@ void capture_resize(int w, int h) {
     c.h = h;
     shim_ipc_send_blob(DOPO_IPC_PKT_FB_INIT, (uint8_t)c.format,
                        (uint16_t)w, (uint32_t)h, c.name, strlen(c.name) + 1);
-    fprintf(stderr, "[libSDL2-shim] capture %dx%d %s via %s\n", w, h,
+    fprintf(stderr, SHIM_TAG " capture %dx%d %s via %s\n", w, h,
             c.format == DOPO_IPC_FORMAT_RGB565 ? "rgb565" : "rgba8888", c.name);
 }
 
@@ -118,7 +118,7 @@ static bool resolve_gl(void) {
     if (c.read_pixels) return true;
     c.read_pixels = (PFN_glReadPixels)(uintptr_t)dlsym(RTLD_DEFAULT, "glReadPixels");
     if (!c.read_pixels) {
-        fprintf(stderr, "[libSDL2-shim] glReadPixels not found, capture disabled\n");
+        fprintf(stderr, SHIM_TAG " glReadPixels not found, capture disabled\n");
         c.format   = DOPO_IPC_FORMAT_EGL;
         c.resolved = true;
     }
@@ -155,6 +155,65 @@ void capture_frame(void) {
         flip_to_565(c.scratch, (uint16_t *)(void *)c.map, c.w, c.h);
     } else {
         flip_to_xrgb(c.scratch, (uint32_t *)(void *)c.map, c.w, c.h);
+    }
+
+    shim_ipc_send(DOPO_IPC_PKT_FB_FRAME, (uint8_t)c.format,
+                  (uint16_t)c.w, (uint32_t)c.h);
+}
+
+static void mask_shift_loss(uint32_t mask, unsigned *shift, unsigned *loss) {
+    if (!mask) {
+        *shift = 0;
+        *loss  = 8;
+        return;
+    }
+    *shift = (unsigned)__builtin_ctz(mask);
+    *loss  = (unsigned)(8 - __builtin_popcount(mask));
+}
+
+static uint32_t pixel_read(const uint8_t *at, int bpp) {
+    switch (bpp) {
+        case 1:  return at[0];
+        case 2:  return *(const uint16_t *)(const void *)at;
+        case 3:  return (uint32_t)at[0] | ((uint32_t)at[1] << 8) | ((uint32_t)at[2] << 16);
+        default: return *(const uint32_t *)(const void *)at;
+    }
+}
+
+void capture_surface(const void *pixels, int pitch, const capture_pixels_t *fmt) {
+    if (!capture_enabled() || !c.map || !pixels || !fmt || pitch <= 0) return;
+    if (fmt->bpp == 1 && !fmt->palette) return;
+
+    unsigned rshift, rloss, gshift, gloss, bshift, bloss;
+    mask_shift_loss(fmt->rmask, &rshift, &rloss);
+    mask_shift_loss(fmt->gmask, &gshift, &gloss);
+    mask_shift_loss(fmt->bmask, &bshift, &bloss);
+
+    const bool to565 = c.format == DOPO_IPC_FORMAT_RGB565;
+    const int  rows  = fmt->h < c.h ? fmt->h : c.h;
+    const int  cols  = fmt->w < c.w ? fmt->w : c.w;
+
+    for (int y = 0; y < rows; y++) {
+        const uint8_t *in   = (const uint8_t *)pixels + (size_t)y * (size_t)pitch;
+        uint32_t      *out32 = (uint32_t *)(void *)c.map + (size_t)y * (size_t)c.w;
+        uint16_t      *out16 = (uint16_t *)(void *)c.map + (size_t)y * (size_t)c.w;
+
+        for (int x = 0; x < cols; x++, in += fmt->bpp) {
+            uint32_t r, g, b;
+            if (fmt->bpp == 1) {
+                uint32_t argb = fmt->palette[in[0]];
+                r = (argb >> 16) & 0xFF;
+                g = (argb >> 8)  & 0xFF;
+                b = argb & 0xFF;
+            } else {
+                uint32_t p = pixel_read(in, fmt->bpp);
+                r = ((p & fmt->rmask) >> rshift) << rloss;
+                g = ((p & fmt->gmask) >> gshift) << gloss;
+                b = ((p & fmt->bmask) >> bshift) << bloss;
+            }
+            if (to565) out16[x] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+            else       out32[x] = (r << 16) | (g << 8) | b;
+        }
     }
 
     shim_ipc_send(DOPO_IPC_PKT_FB_FRAME, (uint8_t)c.format,

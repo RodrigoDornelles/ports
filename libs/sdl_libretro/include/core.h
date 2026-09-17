@@ -24,6 +24,9 @@ void        options_refresh(void);
 const char *option_get(const char *key);
 bool        option_is(const char *key, const char *value);
 void        path_resolve_rel(const char *given, const char *base_file, char *out, size_t cap);
+bool        path_which(const char *name, char *out, size_t cap);
+
+bool        linkage_needs(const char *path, const char *soname);
 
 void        keymap_configure(const char *exec_path);
 bool        keymap_bind(const char *name, bind_t *out);

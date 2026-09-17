@@ -181,7 +181,7 @@ bool retro_load_game(const struct retro_game_info *game) {
     snprintf(s_content, sizeof(s_content), "%s", game->path);
     s_shim_dir[0] = '\0';
 
-    setenv(DOPO_SDL2_ENV_FORMAT, want, 1);
+    setenv(DOPO_ENV_FORMAT, want, 1);
 
     keymap_configure(s_content);
 

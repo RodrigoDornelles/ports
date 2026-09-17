@@ -1,77 +1,18 @@
 #define _GNU_SOURCE
-#include <stdarg.h>
 #include <time.h>
 #include <unistd.h>
 
-#include "shim.h"
+#include "sdl2.h"
 
-static char     s_error[512];
-static Uint32   s_inited;
-static uint64_t s_start_ms;
 static char    *s_clipboard;
 static SDL_bool s_text_input;
 
-uint64_t shim_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
-}
-
-void shim_set_error(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(s_error, sizeof(s_error), fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "[libSDL2-shim] %s\n", s_error);
-}
-
-int SDL_InitSubSystem(Uint32 flags) {
-    if (!s_start_ms) s_start_ms = shim_now_ms();
-    if (!s_inited) {
-        shim_events_init();
-        shim_ipc_connect();
-    }
-    s_inited |= flags | SDL_INIT_EVENTS;
-    return 0;
-}
-
-int SDL_Init(Uint32 flags) {
-    return SDL_InitSubSystem(flags);
-}
-
-void SDL_QuitSubSystem(Uint32 flags) {
-    s_inited &= ~flags;
-}
-
-Uint32 SDL_WasInit(Uint32 flags) {
-    return flags ? (s_inited & flags) : s_inited;
-}
-
-void SDL_Quit(void) {
-    shim_video_quit();
-    shim_ipc_close();
-    shim_events_quit();
-    s_inited = 0;
-}
-
-const char *SDL_GetError(void) {
-    return s_error;
-}
-
-int SDL_SetError(SDL_PRINTF_FORMAT_STRING const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(s_error, sizeof(s_error), fmt, ap);
-    va_end(ap);
-    return -1;
-}
-
-void SDL_ClearError(void) {
-    s_error[0] = '\0';
+/* audio reaches the core through the jack shim, so there is nothing to stop */
+void shim_audio_quit(void) {
 }
 
 char *SDL_GetErrorMsg(char *errstr, int maxlen) {
-    if (errstr && maxlen > 0) snprintf(errstr, (size_t)maxlen, "%s", s_error);
+    if (errstr && maxlen > 0) snprintf(errstr, (size_t)maxlen, "%s", SDL_GetError());
     return errstr;
 }
 
@@ -115,12 +56,7 @@ SDL_bool SDL_GetHintBoolean(const char *name, SDL_bool default_value) {
 }
 
 Uint64 SDL_GetTicks64(void) {
-    if (!s_start_ms) s_start_ms = shim_now_ms();
-    return shim_now_ms() - s_start_ms;
-}
-
-Uint32 SDL_GetTicks(void) {
-    return (Uint32)SDL_GetTicks64();
+    return shim_ticks_ms();
 }
 
 Uint64 SDL_GetPerformanceCounter(void) {
@@ -133,35 +69,12 @@ Uint64 SDL_GetPerformanceFrequency(void) {
     return 1000000000ull;
 }
 
-void SDL_Delay(Uint32 ms) {
-    struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
-    while (nanosleep(&ts, &ts) != 0) {}
-}
-
-void *SDL_malloc(size_t size) {
-    return malloc(size);
-}
-
-void *SDL_calloc(size_t nmemb, size_t size) {
-    return calloc(nmemb, size);
-}
-
-void *SDL_realloc(void *mem, size_t size) {
-    return realloc(mem, size);
-}
-
-void SDL_free(void *mem) {
-    free(mem);
-}
-
 #if defined(__x86_64__) || defined(__i386__)
 #define CPU_HAS(feature) (__builtin_cpu_supports(feature) ? SDL_TRUE : SDL_FALSE)
 #else
 #define CPU_HAS(feature) SDL_FALSE
 #endif
 
-SDL_bool SDL_HasSSE(void)    { return CPU_HAS("sse"); }
-SDL_bool SDL_HasSSE2(void)   { return CPU_HAS("sse2"); }
 SDL_bool SDL_HasSSE3(void)   { return CPU_HAS("sse3"); }
 SDL_bool SDL_HasSSE41(void)  { return CPU_HAS("sse4.1"); }
 SDL_bool SDL_HasSSE42(void)  { return CPU_HAS("sse4.2"); }

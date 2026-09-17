@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -36,7 +37,6 @@ static struct {
     int          client_fd;
     bool         term_sent;
     bool         background;
-    bool         preload;
     unsigned     spawn_count;
     uint16_t     win_w;
     uint16_t     win_h;
@@ -46,7 +46,8 @@ static struct {
     char         bin_path[PATH_MAX];
     bool         bin_on_path;
     char         ld_extra[PATH_MAX];
-    char         shim_path[PATH_MAX];
+    char         shim_dir[PATH_MAX];
+    char         x11_dir[PATH_MAX];
     char         error[256];
 
     int          fb_fd;
@@ -58,7 +59,7 @@ static struct {
     bool         fb_new;
     bool         fb_geometry;
     char         fb_name[64];
-} s = { .listen_fd = -1, .client_fd = -1, .preload = true, .fb_fd = -1 };
+} s = { .listen_fd = -1, .client_fd = -1, .fb_fd = -1 };
 
 static void fb_release(void) {
     if (s.fb_map) munmap(s.fb_map, s.fb_size);
@@ -77,7 +78,7 @@ static void fb_attach(const char *name, unsigned w, unsigned h, unsigned bpp) {
 
     s.fb_fd = shm_open(name, O_RDONLY, 0);
     if (s.fb_fd < 0) {
-        fprintf(stderr, "[sdl2] shm_open %s failed: %s\n", name, strerror(errno));
+        fprintf(stderr, "[dopo] shm_open %s failed: %s\n", name, strerror(errno));
         return;
     }
 
@@ -94,7 +95,7 @@ static void fb_attach(const char *name, unsigned w, unsigned h, unsigned bpp) {
     s.fb_bpp = bpp;
     s.fb_geometry = true;
     snprintf(s.fb_name, sizeof(s.fb_name), "%s", name);
-    fprintf(stderr, "[sdl2] framebuffer %ux%u %ubpp via %s\n", w, h, bpp * 8, name);
+    fprintf(stderr, "[dopo] framebuffer %ux%u %ubpp via %s\n", w, h, bpp * 8, name);
 }
 
 static uint64_t now_ms(void) {
@@ -112,7 +113,7 @@ void process_set_error(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(s.error, sizeof(s.error), fmt, ap);
     va_end(ap);
-    fprintf(stderr, "[sdl2] %s\n", s.error);
+    fprintf(stderr, "[dopo] %s\n", s.error);
 }
 
 static void sockets_close(void) {
@@ -180,7 +181,8 @@ static void read_packets(void) {
                         s.background = true;
 
                     }
-                    fprintf(stderr, "[sdl2] %s connected (pid %u)\n", DOPO_SDL2_SHIM_NAME, pkt.arg);
+                    fprintf(stderr, "[dopo] SDL %u shim connected (pid %u)\n",
+                            pkt.flag, pkt.arg);
                     break;
                 case DOPO_IPC_PKT_WINDOW:
                     s.win_w = pkt.code;
@@ -255,40 +257,29 @@ static char **env_build(void) {
     if (!env) return NULL;
 
     const char *old_ld_path = NULL;
-    const char *old_preload = NULL;
     size_t      n           = 0;
 
+    /* only the library path is ours to extend; LD_PRELOAD is left as the user
+       set it, the loader picks a shim from the search path on its own */
     for (size_t i = 0; i < count; i++) {
         const char *e = environ[i];
         if (env_is(e, "LD_LIBRARY_PATH")) {
             old_ld_path = strchr(e, '=') + 1;
             continue;
         }
-        if (env_is(e, "LD_PRELOAD")) {
-            old_preload = strchr(e, '=') + 1;
-            continue;
-        }
         if (env_is(e, DOPO_IPC_ENV_SOCKET)) continue;
         env[n++] = strdup(e);
     }
 
-    char shim_dir[PATH_MAX];
-    snprintf(shim_dir, sizeof(shim_dir), "%s", s.shim_path);
-    char *slash = strrchr(shim_dir, '/');
-    if (slash) *slash = '\0';
-
-    if (s.ld_extra[0]) {
-        char head[PATH_MAX * 2];
-        snprintf(head, sizeof(head), "%s:%s", shim_dir, s.ld_extra);
-        env[n++] = env_join("LD_LIBRARY_PATH", head, old_ld_path);
-    } else {
-        env[n++] = env_join("LD_LIBRARY_PATH", shim_dir, old_ld_path);
+    char head[PATH_MAX * 3];
+    int  used = snprintf(head, sizeof(head), "%s", s.shim_dir);
+    if (s.x11_dir[0] && used > 0 && (size_t)used < sizeof(head)) {
+        used += snprintf(head + used, sizeof(head) - (size_t)used, ":%s", s.x11_dir);
     }
-    if (s.preload) {
-        env[n++] = env_join("LD_PRELOAD", s.shim_path, old_preload);
-    } else if (old_preload) {
-        env[n++] = env_join("LD_PRELOAD", old_preload, NULL);
+    if (s.ld_extra[0] && used > 0 && (size_t)used < sizeof(head)) {
+        snprintf(head + used, sizeof(head) - (size_t)used, ":%s", s.ld_extra);
     }
+    env[n++] = env_join("LD_LIBRARY_PATH", head, old_ld_path);
     env[n++] = env_join(DOPO_IPC_ENV_SOCKET, s.sock_path, NULL);
     env[n]   = NULL;
     return env;
@@ -340,7 +331,7 @@ static bool spawn(void) {
     s.phase       = PROC_SPAWNED;
     s.term_sent   = false;
     s.deadline_ms = now_ms() + 20000;
-    fprintf(stderr, "[sdl2] spawned pid %d: %s\n", (int)pid, s.exec_path);
+    fprintf(stderr, "[dopo] spawned pid %d: %s\n", (int)pid, s.exec_path);
     return true;
 }
 
@@ -361,12 +352,68 @@ static void on_exit_status(int status) {
         process_set_error("%s exited with status %d", s.exec_path, code);
         s.phase = PROC_FAILED;
     } else {
-        fprintf(stderr, "[sdl2] pid %d exited (status %d)\n", (int)s.pid, code);
+        fprintf(stderr, "[dopo] pid %d exited (status %d)\n", (int)s.pid, code);
         s.phase = PROC_IDLE;
     }
     s.pid = 0;
     sockets_close();
     core_foreground();
+}
+
+/*
+ * The fake libX11 replaces a missing X server, and only that. Where a real one
+ * answers it must stay off the search path: other X libraries in the process
+ * bind against Xlib internals that only the real libX11 has, and shadowing it
+ * breaks them long before the game gets to run.
+ */
+static bool x11_server_answers(void) {
+    void *lib = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
+    if (!lib) return false;
+
+    void *(*open_display)(const char *)  = dlsym(lib, "XOpenDisplay");
+    int   (*close_display)(void *)       = dlsym(lib, "XCloseDisplay");
+
+    bool answers = false;
+    if (open_display) {
+        void *display = open_display(NULL);
+        if (display) {
+            answers = true;
+            if (close_display) close_display(display);
+        }
+    }
+    dlclose(lib);
+    return answers;
+}
+
+/* the shims for a missing window system only go on the path for a binary that
+   asks for one, so nothing else in the process ends up looking at them */
+static void x11_resolve(void) {
+    char        resolved[PATH_MAX];
+    const char *target = s.exec_path;
+
+    s.x11_dir[0] = '\0';
+
+    if (s.bin_path[0]) {
+        target = s.bin_path;
+        if (s.bin_on_path && path_which(s.bin_path, resolved, sizeof(resolved))) {
+            target = resolved;
+        }
+    }
+    if (!linkage_needs(target, "libX11.so.6")) return;
+
+    if (x11_server_answers()) {
+        fprintf(stderr, "[dopo] %s wants X11 and a server answers, leaving it alone\n", target);
+        return;
+    }
+
+    int n = snprintf(s.x11_dir, sizeof(s.x11_dir), "%s/x11", s.shim_dir);
+    if (n < 0 || (size_t)n >= sizeof(s.x11_dir) || access(s.x11_dir, X_OK) != 0) {
+        fprintf(stderr, "[dopo] %s wants X11 but the shims are missing from %s/x11\n",
+                target, s.shim_dir);
+        s.x11_dir[0] = '\0';
+        return;
+    }
+    fprintf(stderr, "[dopo] %s wants X11 and no server answers, standing in for one\n", target);
 }
 
 bool process_request(const char *path, const char *shim_dir) {
@@ -378,17 +425,10 @@ bool process_request(const char *path, const char *shim_dir) {
         return false;
     }
     if (!shim_dir || !shim_dir[0]) {
-        process_set_error("could not resolve %s directory", DOPO_SDL2_SHIM_NAME);
+        process_set_error("could not resolve the shim directory");
         return false;
     }
-    snprintf(s.shim_path, sizeof(s.shim_path), "%s/%s", shim_dir, DOPO_SDL2_SHIM_NAME);
-    if (stat(s.shim_path, &st) != 0) {
-        process_set_error("shim not found: %s", s.shim_path);
-        return false;
-    }
-
-    const char *preload = option_get("sdl_preload");
-    s.preload = !(preload && (preload[0] == '0' || preload[0] == 'n' || preload[0] == 'f'));
+    snprintf(s.shim_dir, sizeof(s.shim_dir), "%s", shim_dir);
 
     s.bin_path[0]  = '\0';
     s.bin_on_path  = false;
@@ -429,12 +469,14 @@ bool process_request(const char *path, const char *shim_dir) {
 
             struct stat lst;
             if (stat(one, &lst) != 0) {
-                fprintf(stderr, "[sdl2] warning: ld path does not exist: %s\n", one);
+                fprintf(stderr, "[dopo] warning: ld path does not exist: %s\n", one);
             }
         }
     }
 
     snprintf(s.exec_path, sizeof(s.exec_path), "%s", path);
+    x11_resolve();
+
     s.win_w = s.win_h = 0;
     s.phase = PROC_PENDING;
     return true;
@@ -486,7 +528,7 @@ void process_tick(void) {
 
     uint64_t now = now_ms();
     if (s.phase == PROC_SPAWNED && now > s.deadline_ms) {
-        process_set_error("timeout waiting for %s to connect", DOPO_SDL2_SHIM_NAME);
+        process_set_error("timeout waiting for %s to connect", s.exec_path);
         kill(-s.pid, SIGKILL);
         s.phase = PROC_STOPPING;
         return;
