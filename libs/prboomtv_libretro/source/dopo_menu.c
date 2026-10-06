@@ -378,12 +378,14 @@ static void dopo_open_patchs(int choice)
 extern dbool dopo_cheat_ammo;
 extern dbool dopo_cheat_life;
 extern dbool dopo_cheat_weapons;
+extern dbool dopo_cheat_damage;
 extern int dopo_cheat_aim_assist;
 extern int dopo_cheat_trigger_assist;
 
 static void dopo_toggle_cheat_ammo(int choice)    { dopo_cheat_ammo = !dopo_cheat_ammo; }
 static void dopo_toggle_cheat_life(int choice)    { dopo_cheat_life = !dopo_cheat_life; }
 static void dopo_toggle_cheat_weapons(int choice) { dopo_cheat_weapons = !dopo_cheat_weapons; }
+static void dopo_toggle_cheat_damage(int choice)  { dopo_cheat_damage = !dopo_cheat_damage; }
 /**
  * @brief Cheats routines: the assists' openings, OFF and then degrees on
  * each side of the crosshair, the same steps for both; 45 covers the 4:3
@@ -412,6 +414,7 @@ static menuitem_t dopo_cheats_items[] =
 {
   {1, "", dopo_toggle_cheat_ammo,    'a', "Infinite Ammo"},
   {1, "", dopo_toggle_cheat_life,    'l', "Infinite Life"},
+  {1, "", dopo_toggle_cheat_damage,  'd', "Infinite Damage"},
   {1, "", dopo_toggle_cheat_weapons, 'w', "All Weapons"},
   {2, "", dopo_adjust_cheat_aim,     'i', "Aim Assist"},
   {2, "", dopo_adjust_cheat_trigger, 't', "Trigger Assist"},
@@ -419,7 +422,7 @@ static menuitem_t dopo_cheats_items[] =
 
 static menu_t dopo_cheats_def =
 {
-  5,
+  6,
   &dopo_dopo_def,
   dopo_cheats_items,
   dopo_draw_cheats,
@@ -431,7 +434,7 @@ static void dopo_draw_cheats(void)
 {
   static const dbool *const values[] =
   {
-    &dopo_cheat_ammo, &dopo_cheat_life, &dopo_cheat_weapons,
+    &dopo_cheat_ammo, &dopo_cheat_life, &dopo_cheat_damage, &dopo_cheat_weapons,
   };
   char aim[16], trigger[16];
 
@@ -439,9 +442,9 @@ static void dopo_draw_cheats(void)
   dopo_format_value(trigger, sizeof(trigger), dopo_cheat_trigger_assist, "DEG");
 
   dopo_text_centered(15, "CHEATS", CR_DEFAULT);
-  dopo_draw_toggles(&dopo_cheats_def, values, 3);
-  dopo_draw_value(&dopo_cheats_def, 3, aim);
-  dopo_draw_value(&dopo_cheats_def, 4, trigger);
+  dopo_draw_toggles(&dopo_cheats_def, values, 4);
+  dopo_draw_value(&dopo_cheats_def, 4, aim);
+  dopo_draw_value(&dopo_cheats_def, 5, trigger);
 }
 
 static void dopo_open_cheats(int choice)
