@@ -18,7 +18,12 @@ endif()
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 option(PORTS_USE_SDL_LIBRETRO "build sdl_libretro core (libretro backend + sdl2/jack frontends)" ON)
+option(PORTS_USE_PRBOOMTV_LIBRETRO "build prboomtv_libretro core (prboom patched for tv)" ON)
 
 if (PORTS_USE_SDL_LIBRETRO)
     include(cmake/sdl_libretro.cmake)
+endif()
+
+if (PORTS_USE_PRBOOMTV_LIBRETRO)
+    include(cmake/prboomtv.cmake)
 endif()
