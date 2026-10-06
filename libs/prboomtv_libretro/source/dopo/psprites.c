@@ -1,7 +1,7 @@
 /**
  * @brief Weapon sprites: the single upstream function that ticks the
- * player's weapon states, shared by Toggle Fire (toggle_fire.c), Trigger
- * Assist and Aim Assist (aim_assist.c).
+ * player's weapon states, shared by Toggle Fire (patchs/toggle_fire.c),
+ * Trigger Assist and Aim Assist (cheats/aim_assist.c).
  */
 
 /**

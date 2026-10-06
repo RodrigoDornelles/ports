@@ -255,7 +255,7 @@ static void dopo_open_dopo_options(int choice)
 /**
  * @brief Change Game: the games next to the running content, in pages of
  * DOPO_GAMES_PAGE, and a Change/Cancel confirmation; the switch itself
- * happens in libretro.c (change_game.c) at the next frame.
+ * happens in libretro.c (dopo/change_game.c) at the next frame.
  */
 extern int         dopo_games_scan(void);
 extern const char *dopo_games_name(int i);

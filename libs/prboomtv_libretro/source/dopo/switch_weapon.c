@@ -2,7 +2,7 @@
  * @brief Switch Weapon: lists the collected weapons with their ammo and
  * raises the chosen one.
  *
- * Opened from the main menu (see dopo_menu.c) while a level is played.
+ * Opened from the main menu (see dopo/menus.c) while a level is played.
  * Names are drawn in the big font of the game, ammo in gold.
  */
 

@@ -9,7 +9,7 @@
  * clock). It applies to the gamepad buttons bound to turning
  * (key_left/key_right, the classic layout's d-pad); the modern layout
  * already strafes with the left stick. process_gamepad_buttons
- * (gamepad_buttons.c) routes those buttons through the helpers below.
+ * (dopo/gamepad_buttons.c) routes those buttons through the helpers below.
  */
 
 /**
