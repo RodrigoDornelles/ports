@@ -96,8 +96,9 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
 /**
  * @brief Decides whether the action button uses or fires.
  *
- * The choice is made once on press and held until release, so walking
- * into a door while firing keeps firing.
+ * An enemy in the line of fire always wins; otherwise it uses when
+ * something usable is within reach. The choice is made once on press and
+ * held until release, so walking into a door while firing keeps firing.
  *
  * @patch libretro/libretro.c 3399
  */
@@ -125,7 +126,29 @@ static dbool dopo_action_use_traverse(intercept_t *in)
 }
 
 /**
- * @brief Whether pressing use now would reach something usable.
+ * @brief Whether an enemy sits in the line of fire, with the same autoaim
+ * range, spread and friend filter as the weapons (P_BulletSlope).
+ */
+static dbool dopo_action_enemy_ahead(mobj_t *mo)
+{
+   mobj_t *saved = linetarget;
+   uint64_t mask = mbf_features ? MF_FRIEND : 0;
+   dbool found;
+
+   P_AimLineAttack(mo, mo->angle, 16*64*FRACUNIT, mask);
+   if (!linetarget)
+      P_AimLineAttack(mo, mo->angle + (1<<26), 16*64*FRACUNIT, mask);
+   if (!linetarget)
+      P_AimLineAttack(mo, mo->angle - (1<<26), 16*64*FRACUNIT, mask);
+
+   found = linetarget != NULL;
+   linetarget = saved;
+   return found;
+}
+
+/**
+ * @brief Whether pressing use now would reach something usable and no
+ * enemy is in the line of fire.
  */
 static dbool dopo_action_use_ahead(void)
 {
@@ -138,6 +161,9 @@ static dbool dopo_action_use_ahead(void)
 
    if (P_ConversationIsActive())
       return TRUE;
+
+   if (dopo_action_enemy_ahead(mo))
+      return FALSE;
 
    angle = mo->angle >> ANGLETOFINESHIFT;
    x2 = mo->x + (USERANGE>>FRACBITS)*finecosine[angle];
