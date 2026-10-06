@@ -27,6 +27,13 @@
 #define DOPO_ACTION_BUTTON RETRO_DEVICE_ID_JOYPAD_A
 
 /**
+ * @brief Whether DOPO_ACTION_BUTTON acts as the contextual action button;
+ * toggled from Dopo Options > Patchs and not saved. When off, the button
+ * does what its layout binds it to.
+ */
+dbool dopo_action_button = TRUE;
+
+/**
  * @brief Returns the layout for a gamepad device in the running game,
  * labelling DOPO_ACTION_BUTTON as the action button.
  */
@@ -179,8 +186,9 @@ static dbool dopo_action_use_ahead(void)
 /**
  * @brief Posts gamepad button changes as key events.
  *
- * In game, DOPO_ACTION_BUTTON resolves to use or fire whatever the layout
- * binds it to; in the menu it keeps the layout's confirm key.
+ * In game, while dopo_action_button is on, DOPO_ACTION_BUTTON resolves to
+ * use or fire whatever the layout binds it to; in the menu it keeps the
+ * layout's confirm key.
  *
  * @patch libretro/libretro.c 3399-3426
  */
@@ -197,7 +205,7 @@ static void process_gamepad_buttons(int16_t ret, unsigned num_buttons, action_lu
       if(new_input[i] && !old_input[i])
       {
          event.type = ev_keydown;
-         if (i == DOPO_ACTION_BUTTON && !menuactive)
+         if (i == DOPO_ACTION_BUTTON && dopo_action_button && !menuactive)
          {
             dopo_action_latched = dopo_action_use_ahead() ? key_use : key_fire;
             event.data1 = dopo_action_latched;

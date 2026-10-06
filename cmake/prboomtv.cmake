@@ -4,8 +4,40 @@ set(PRBOOM_DIR "${CMAKE_SOURCE_DIR}/vendor/prboom")
 
 set(PRBOOMTV_DIR "${CMAKE_CURRENT_LIST_DIR}/../libs/prboomtv_libretro")
 
+set(ODAMEX_VERSION "3063c2e8fd8938ad16736c6715c5e83142d640a4")
+set(ODAMEX_DOWNLOAD "https://raw.githubusercontent.com/odamex/odamex/${ODAMEX_VERSION}")
+set(ODAMEX_DIR "${CMAKE_SOURCE_DIR}/vendor/odamex")
+
+set(STB_VERSION "2c980bb59875b0d32144a71867fbdebb2f77cd20")
+set(STB_DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/${STB_VERSION}/stb_image.h")
+set(STB_DIR "${CMAKE_SOURCE_DIR}/vendor/stb")
+
 if (NOT EXISTS "${PRBOOM_DIR}/src")
     FetchContent_Populate(prboom URL ${PRBOOM_DOWNLOAD} SOURCE_DIR ${PRBOOM_DIR})
+endif()
+
+# only the Odamex big font (FONTB01..63, '!'..'_'), its palette and license;
+# the whole repository would be ~80MB for a few kilobytes of glyphs
+if (NOT EXISTS "${ODAMEX_DIR}/LICENSE")
+    set(odamex_files wad/doom.gpl README.md)
+    foreach(i RANGE 1 63)
+        string(LENGTH "${i}" digits)
+        if (digits EQUAL 1)
+            set(i "0${i}")
+        endif()
+        list(APPEND odamex_files "wad/graphics/fontb${i}.png")
+    endforeach()
+    foreach(file ${odamex_files} LICENSE)
+        file(DOWNLOAD "${ODAMEX_DOWNLOAD}/${file}" "${ODAMEX_DIR}/${file}" STATUS status)
+        list(GET status 0 code)
+        if (code)
+            message(FATAL_ERROR "prboomtv: failed to download odamex ${file}: ${status}")
+        endif()
+    endforeach()
+endif()
+
+if (NOT EXISTS "${STB_DIR}/stb_image.h")
+    file(DOWNLOAD "${STB_DOWNLOAD}" "${STB_DIR}/stb_image.h")
 endif()
 
 # upstream Makefile.common (unix, threads on, fluidsynth off)
@@ -195,30 +227,48 @@ foreach(file ${prboomtv_source_files})
     endif()
 endforeach()
 
-# the patch tool runs here at configure time, so it is built with the
+# host tools run here at configure time, so they are built with the
 # machine's own c++, never with the cross toolchain
-set(PRBOOMTV_PATCHS_TOOL_SOURCE "${CMAKE_SOURCE_DIR}/scripts/prboomtv_patchs.cpp")
-set(PRBOOMTV_PATCHS_TOOL "${CMAKE_BINARY_DIR}/prboomtv/prboomtv_patchs")
-set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
-
 find_program(PRBOOMTV_HOST_CXX NAMES c++ g++ clang++ REQUIRED NO_CMAKE_FIND_ROOT_PATH)
 
-if (NOT EXISTS "${PRBOOMTV_PATCHS_TOOL}" OR "${PRBOOMTV_PATCHS_TOOL_SOURCE}" IS_NEWER_THAN "${PRBOOMTV_PATCHS_TOOL}")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/prboomtv")
-    execute_process(
-        COMMAND "${PRBOOMTV_HOST_CXX}" -std=c++23 -O2 -o "${PRBOOMTV_PATCHS_TOOL}" "${PRBOOMTV_PATCHS_TOOL_SOURCE}"
-        RESULT_VARIABLE prboomtv_patchs_result
-        ERROR_VARIABLE prboomtv_patchs_error)
-    if (prboomtv_patchs_result)
-        message(FATAL_ERROR "prboomtv: failed to build the patch tool\n${prboomtv_patchs_error}")
+function(prboomtv_host_tool name source)
+    set(tool "${CMAKE_BINARY_DIR}/prboomtv/${name}")
+    if (NOT EXISTS "${tool}" OR "${source}" IS_NEWER_THAN "${tool}")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/prboomtv")
+        execute_process(
+            COMMAND "${PRBOOMTV_HOST_CXX}" -std=c++23 -O2 ${ARGN} -o "${tool}" "${source}"
+            RESULT_VARIABLE result
+            ERROR_VARIABLE error)
+        if (result)
+            message(FATAL_ERROR "prboomtv: failed to build ${name}\n${error}")
+        endif()
     endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+    set(${name}_TOOL "${tool}" PARENT_SCOPE)
+endfunction()
+
+# the Odamex big font, converted into an embedded WAD for the menus
+set(PRBOOMTV_GENERATED "${CMAKE_BINARY_DIR}/prboomtv/generated")
+prboomtv_host_tool(prboomtv_font "${CMAKE_SOURCE_DIR}/scripts/prboomtv_font.cpp" -isystem "${STB_DIR}")
+execute_process(
+    COMMAND "${prboomtv_font_TOOL}"
+        --glyphs "${ODAMEX_DIR}/wad/graphics"
+        --palette "${ODAMEX_DIR}/wad/doom.gpl"
+        --wad "${PRBOOMTV_GENERATED}/dopo_wad_data.h"
+        --font "${PRBOOMTV_GENERATED}/dopo_font_data.h"
+    RESULT_VARIABLE prboomtv_font_result
+    ERROR_VARIABLE prboomtv_font_error)
+if (prboomtv_font_result)
+    message(FATAL_ERROR "prboomtv: failed to convert the Odamex font\n${prboomtv_font_error}")
 endif()
 
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${PRBOOMTV_PATCHS_TOOL_SOURCE}" ${prboomtv_patch_files})
+prboomtv_host_tool(prboomtv_patchs "${CMAKE_SOURCE_DIR}/scripts/prboomtv_patchs.cpp")
+set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_patch_files})
 
 execute_process(
-    COMMAND "${PRBOOMTV_PATCHS_TOOL}" --source "${PRBOOM_DIR}" --output "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files}
+    COMMAND "${prboomtv_patchs_TOOL}" --source "${PRBOOM_DIR}" --output "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files}
     RESULT_VARIABLE prboomtv_patchs_result
     OUTPUT_VARIABLE prboomtv_patched_files
     ERROR_VARIABLE prboomtv_patchs_error
@@ -261,7 +311,8 @@ add_library(prboomtv_libretro SHARED "${prboomtv_files}")
 target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
-    "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs})
+    "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
+    "${PRBOOMTV_GENERATED}")
 target_compile_definitions(prboomtv_libretro PRIVATE
     HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_THREADS HAVE_MMAP
     INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE)
