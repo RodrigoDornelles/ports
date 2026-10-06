@@ -1,0 +1,106 @@
+PrBoomTV - notas sobre multiplayer
+==================================
+
+Estado atual do core
+--------------------
+- O fork libretro-prboom NAO tem rede no engine: o d_client.c virou 166
+  linhas para um jogador so (sem I_InitNetwork / pacotes). O
+  prboom-game-server original (lockstep, so LAN) foi removido.
+- MAS as regras de multiplayer continuam no engine:
+  - coop, deathmatch (deathmatch = 1) e altdeath (deathmatch = 2);
+  - inicios dos jogadores 1-4 (things 1-4) e de deathmatch (thing 11);
+  - coisas "so multiplayer" (flag 16 no mapa);
+  - armas/chaves ficam no chao em netgame; renascer no inicio com pistola;
+  - "-solo-net" ainda existe (D_InitNetGame).
+- O loop ja roda N jogadores: G_Ticker copia o ticcmd de cada jogador ativo
+  de netcmds[i] (g_game.c ~1064). Falta so preencher netcmds com os
+  comandos das outras maquinas (lockstep).
+- Save state existe (retro_serialize/unserialize), necessario para o
+  netplay do RetroArch.
+- Hoje o core so le o controle do jogador 1 (porta 0).
+
+Multiplayer no Doom original
+----------------------------
+- Desde o Doom 1993, inclusive shareware: ate 4 jogadores (IPX/serial),
+  cada um no seu computador com a propria visao.
+- Modos: cooperativo (padrao), -deathmatch, -altdeath (itens reaparecem).
+- Nao precisa de WAD especial: os IWADs ja tem inicios 2-4 e de DM.
+
+Cena multiplayer existente (interoperar com outros ports)
+---------------------------------------------------------
+- Nao existe protocolo "neutro": multiplayer de Doom exige simulacao
+  identica, cada cena e presa ao seu engine.
+- Odamex (GPL-2.0, cliente/servidor, servidores publicos) e Zandronum
+  (ZDoom) sao as cenas ativas; Chocolate/Crispy tem lockstep com cena
+  pequena. Jogar com eles = portar o cliente deles (inviavel / outro port).
+
+Netplay do RetroArch
+--------------------
+- Nao e da API libretro: e recurso do frontend RetroArch, protocolo proprio
+  (magic "RANP"), GPL-3.
+- Modelo: um jogador hospeda (servidor), os outros conectam (clientes);
+  porta padrao 55435 TCP; trafega so input; rollback com save state;
+  core precisa ser deterministico.
+- Lobby publico: lobby.libretro.com (lista em JSON em /list, com id da sala,
+  apelido do host, core, WAD, regiao, senha, relay).
+- Relay ("MITM") para NAT: ex. us-east1.relay.retroarch.com:34327; existe
+  um relay alternativo em Python (netplay-tunnel-server) que da para
+  hospedar (ex.: um relay proprio no Brasil).
+- Exigencias: mesma versao do RetroArch (relay oficial derruba versoes
+  diferentes), mesma versao do core, mesmo conteudo (checksum). Cuidado
+  entre arquiteturas (x86-64 vs ARM 32 bits pode quebrar save state).
+- Outro frontend nao conversa com o netplay do RetroArch sem reimplementar
+  o protocolo exato. Fingir ser "a ultima versao do RetroArch" nao e
+  recomendado: dessincronia, confunde usuarios, pode ser bloqueado. Melhor:
+  se identificar, falar com o libretro, ou ter lobby/relay proprios.
+- Netplay "classico" do RetroArch = um jogo replicado, uma visao so
+  (coop de tela compartilhada) a menos que cada maquina mostre o seu
+  jogador (a visao nao afeta a simulacao).
+
+Ajustes no core para qualquer netplay
+-------------------------------------
+- Ler controles das portas 2-4 e mapear para jogadores 2-4.
+- Side Walk: medir tempo em tics em vez do relogio (so importa no netplay
+  do RetroArch; no lockstep proprio os ticcmds ja vem prontos).
+- Toggles do Dopo (Patchs/Cheats) dentro do save state, ou iguais em
+  todas as maquinas.
+- Patches que mexem na logica (Auto Fist, Toggle Fire, assists, cheats) ja
+  ficam desligados em netgame/demoplayback.
+
+Plano: multiplayer "estilo Doom" (lockstep) no PrBoomTV
+------------------------------------------------------
+Transporte, duas opcoes:
+ A) libretro netpacket interface (RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE,
+    ja no libretro.h do fork): o RetroArch so entrega a conexao (sala,
+    lobby, relay continuam funcionando) e o core troca pacotes proprios.
+    O frontend proprio tambem pode implementar a mesma interface.
+    Limite: a lista de salas do RetroArch e montada por ele (apelido, core,
+    WAD); o core nao consegue mudar o anuncio nem mandar o RetroArch
+    "entrar na sala X".
+ B) Rede no proprio core + lobby/relay proprios (RECOMENDADO para TV):
+    - host cria a partida no menu do core; o lobby da um codigo curto
+      (ex.: "4F2K") e lista a sala com nome, modo, fase, vagas;
+    - "Salas" dentro do core lista as partidas; entrar direto ou por codigo;
+    - trafego pelo relay proprio (sem problema de NAT);
+    - funciona em qualquer frontend (RetroArch incluso).
+
+Protocolo proprio (mensagens), host como autoridade:
+- config da sala: nome, modo (Coop/Deathmatch/Altdeath), fase, skill,
+  monstros on/off, limite de frags/tempo;
+- entrada/saida de jogador, apelido, pronto, chat curto;
+- inicio da partida (todos juntos);
+- ticcmd por tic (lockstep: so avanca com os comandos de todos);
+- checagem de consistencia (detectar dessincronia, como o Doom fazia);
+- tratar quem cai (remover jogador).
+
+Menus no core:
+- Multiplayer: Criar sala (modo, fase, skill, monstros) / Salas (lista,
+  entrar, codigo) / sala de espera (jogadores, pronto, Start do host);
+- placar de frags no deathmatch.
+
+Estimativa (lockstep): ponte de transporte ~150 linhas, lockstep no
+d_client.c ~300 linhas, menus ~200 linhas, + servidor de lobby/relay
+(opcao B). Projeto medio-grande (semanas), testar com 2+ instancias.
+Lockstep tem atraso = ida e volta da rede: otimo em LAN, ok com ping baixo.
+Todos precisam da mesma versao do PrBoomTV e dos mesmos WADs (conferir no
+handshake).
