@@ -4,9 +4,10 @@
  * Every game gets the Heretic/Hexen main menu: New Game, Game Files,
  * Settings, Quit Game, where New Game turns into Switch Weapon while a level
  * is played. Game Files holds New Game, Load Game, Save Game and Delete
- * Game. Settings leads to Dopo Options (patches, cheats and Read This!)
- * and Game Options (the engine options, without Mouse Sensitivity and with
- * the game's Read This!). Every item is drawn as text in the big font.
+ * Game. Settings leads to Dopo Options (patches, cheats and Read This!),
+ * Game Options (the engine options, without Mouse Sensitivity and with the
+ * game's Read This!) and Change Game. Every item is drawn as text in the
+ * big font.
  */
 
 /**
@@ -169,16 +170,18 @@ static void dopo_draw_options(void)
 
 static void dopo_open_dopo_options(int choice);
 static void dopo_open_game_options(int choice);
+static void dopo_open_change_game(int choice);
 
 static menuitem_t dopo_options_items[] =
 {
   {1, "", dopo_open_dopo_options, 'd', "Dopo Options"},
   {1, "", dopo_open_game_options, 'g', "Game Options"},
+  {1, "", dopo_open_change_game,  'c', "Change Game"},
 };
 
 static menu_t dopo_options_def =
 {
-  2,
+  3,
   NULL,
   dopo_options_items,
   dopo_draw_options,
@@ -247,6 +250,176 @@ static menu_t dopo_dopo_def =
 static void dopo_open_dopo_options(int choice)
 {
   M_SetupNextMenu(&dopo_dopo_def);
+}
+
+/**
+ * @brief Change Game: the games next to the running content, in pages of
+ * DOPO_GAMES_PAGE, and a Change/Cancel confirmation; the switch itself
+ * happens in libretro.c (change_game.c) at the next frame.
+ */
+extern int         dopo_games_scan(void);
+extern const char *dopo_games_name(int i);
+extern dbool       dopo_games_is_current(int i);
+extern void        dopo_games_load(int i);
+
+#define DOPO_GAMES_PAGE  8
+#define DOPO_GAME_LABEL  17
+
+static int  dopo_games_total;
+static int  dopo_games_first;
+static int  dopo_game_chosen;
+static char dopo_game_labels[DOPO_GAMES_PAGE][DOPO_GAME_LABEL];
+static char dopo_games_page_text[24];
+
+static menuitem_t dopo_games_items[DOPO_GAMES_PAGE + 1];
+
+/**
+ * @brief Menu routine: Change Game title, the running game and the page.
+ */
+static void dopo_draw_games(void);
+
+static menu_t dopo_games_def =
+{
+  0,
+  &dopo_options_def,
+  dopo_games_items,
+  dopo_draw_games,
+  40,40,
+  0
+};
+
+static void dopo_games_pick(int choice);
+static void dopo_games_next_page(int choice);
+
+/**
+ * @brief Builds the current page: one item per game, named after its file
+ * without extension, then Next Page when the list is longer than a page.
+ */
+static void dopo_games_fill(void)
+{
+  int n = 0;
+  int i;
+
+  for (i = dopo_games_first; i < dopo_games_total && n < DOPO_GAMES_PAGE; i++, n++)
+  {
+    char *label = dopo_game_labels[n];
+    char *dot;
+
+    snprintf(label, DOPO_GAME_LABEL, "%s", dopo_games_name(i));
+    if ((dot = strrchr(label, '.')) != NULL)
+      *dot = 0;
+    dopo_games_items[n] = (menuitem_t){ 1, "", dopo_games_pick, 0, label };
+  }
+
+  if (dopo_games_total > DOPO_GAMES_PAGE)
+  {
+    dopo_games_items[n++] = (menuitem_t){ 1, "", dopo_games_next_page, 'n', "Next Page" };
+    snprintf(dopo_games_page_text, sizeof(dopo_games_page_text), "PAGE %d/%d",
+             dopo_games_first / DOPO_GAMES_PAGE + 1,
+             (dopo_games_total + DOPO_GAMES_PAGE - 1) / DOPO_GAMES_PAGE);
+  }
+  else
+    dopo_games_page_text[0] = 0;
+
+  dopo_games_def.numitems = n;
+  if (dopo_games_def.lastOn >= n)
+    dopo_games_def.lastOn = 0;
+}
+
+static void dopo_draw_games(void)
+{
+  int row;
+
+  dopo_text_centered(15, "CHANGE GAME", CR_DEFAULT);
+  if (!dopo_games_total)
+  {
+    M_WriteText(160 - M_StringWidth("NO WADS NEXT TO THIS GAME") / 2, 60,
+                "NO WADS NEXT TO THIS GAME", CR_GRAY);
+    return;
+  }
+
+  for (row = 0; row < DOPO_GAMES_PAGE && dopo_games_first + row < dopo_games_total; row++)
+    if (dopo_games_is_current(dopo_games_first + row))
+      dopo_text(dopo_games_def.x + 190, dopo_games_def.y + LINEHEIGHT*row, "CURRENT", CR_GOLD);
+
+  if (dopo_games_page_text[0])
+    M_WriteText(310 - M_StringWidth(dopo_games_page_text), 188, dopo_games_page_text, CR_GOLD);
+}
+
+static void dopo_games_next_page(int choice)
+{
+  dopo_games_first += DOPO_GAMES_PAGE;
+  if (dopo_games_first >= dopo_games_total)
+    dopo_games_first = 0;
+  dopo_games_def.lastOn = 0;
+  dopo_games_fill();
+  M_SetupNextMenu(&dopo_games_def);
+}
+
+/**
+ * @brief Menu routine: the confirmation's title and the chosen game.
+ */
+static void dopo_draw_game_confirm(void)
+{
+  const char *name = dopo_games_name(dopo_game_chosen);
+
+  dopo_text_centered(15, "CHANGE GAME", CR_DEFAULT);
+  M_WriteText(160 - M_StringWidth(name) / 2, 40, name, CR_GOLD);
+  M_WriteText(160 - M_StringWidth("UNSAVED PROGRESS WILL BE LOST") / 2, 52,
+              "UNSAVED PROGRESS WILL BE LOST", CR_GRAY);
+}
+
+static void dopo_game_confirm(int choice);
+static void dopo_game_cancel(int choice);
+
+static menuitem_t dopo_game_confirm_items[] =
+{
+  {1, "", dopo_game_confirm, 'c', "Change"},
+  {1, "", dopo_game_cancel,  'n', "Cancel"},
+};
+
+static menu_t dopo_game_confirm_def =
+{
+  2,
+  &dopo_games_def,
+  dopo_game_confirm_items,
+  dopo_draw_game_confirm,
+  120,72,
+  1  /* start on Cancel */
+};
+
+static void dopo_games_pick(int choice)
+{
+  dopo_game_chosen = dopo_games_first + choice;
+  dopo_game_confirm_def.lastOn = 1;
+  M_SetupNextMenu(&dopo_game_confirm_def);
+}
+
+/**
+ * @brief Asks for the switch and closes the menu; the game changes at the
+ * next frame.
+ */
+static void dopo_game_confirm(int choice)
+{
+  dopo_games_load(dopo_game_chosen);
+  M_ClearMenus();
+}
+
+static void dopo_game_cancel(int choice)
+{
+  M_SetupNextMenu(&dopo_games_def);
+}
+
+/**
+ * @brief Settings routine: lists the games and opens Change Game.
+ */
+static void dopo_open_change_game(int choice)
+{
+  dopo_games_total = dopo_games_scan();
+  dopo_games_first = 0;
+  dopo_games_def.lastOn = 0;
+  dopo_games_fill();
+  M_SetupNextMenu(&dopo_games_def);
 }
 
 /**
