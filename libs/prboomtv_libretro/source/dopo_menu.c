@@ -156,6 +156,7 @@ void M_DrawOptions(void)
 
 extern dbool dopo_action_button;
 extern dbool dopo_auto_fist;
+extern dbool dopo_toggle_fire;
 extern int dopo_side_walk_ms;
 
 /**
@@ -289,6 +290,14 @@ static void dopo_toggle_auto_fist(int choice)
 }
 
 /**
+ * @brief Patchs routine: turns Toggle Fire on or off.
+ */
+static void dopo_toggle_toggle_fire(int choice)
+{
+  dopo_toggle_fire = !dopo_toggle_fire;
+}
+
+/**
  * @brief Patchs routine: Side Walk's double tap window, OFF and 100ms to
  * 300ms in 50ms steps; right (and confirm) goes up, left goes down, both
  * wrapping around.
@@ -309,12 +318,13 @@ static menuitem_t dopo_patchs_items[] =
 {
   {1, "", dopo_toggle_action_button, 'a', "Action Button"},
   {1, "", dopo_toggle_auto_fist,     'f', "Auto Fist"},
+  {1, "", dopo_toggle_toggle_fire,   't', "Toggle Fire"},
   {2, "", dopo_adjust_side_walk,     's', "Side Walk"},
 };
 
 static menu_t dopo_patchs_def =
 {
-  3,
+  4,
   &dopo_dopo_def,
   dopo_patchs_items,
   dopo_draw_patchs,
@@ -324,15 +334,18 @@ static menu_t dopo_patchs_def =
 
 static void dopo_draw_patchs(void)
 {
-  static const dbool *const values[] = { &dopo_action_button, &dopo_auto_fist };
+  static const dbool *const values[] =
+  {
+    &dopo_action_button, &dopo_auto_fist, &dopo_toggle_fire,
+  };
   char side_walk[16] = "OFF";
 
   if (dopo_side_walk_ms)
     snprintf(side_walk, sizeof(side_walk), "%dMS", dopo_side_walk_ms);
 
   dopo_text_centered(15, "PATCHS", CR_DEFAULT);
-  dopo_draw_toggles(&dopo_patchs_def, values, 2);
-  dopo_draw_value(&dopo_patchs_def, 2, side_walk);
+  dopo_draw_toggles(&dopo_patchs_def, values, 3);
+  dopo_draw_value(&dopo_patchs_def, 3, side_walk);
 }
 
 static void dopo_open_patchs(int choice)
