@@ -156,6 +156,7 @@ void M_DrawOptions(void)
 
 extern dbool dopo_action_button;
 extern dbool dopo_auto_fist;
+extern int dopo_side_walk_ms;
 
 /**
  * @brief Menu routine: title of Settings, the Dopo/Game Options chooser.
@@ -248,15 +249,22 @@ static void dopo_open_dopo_options(int choice)
 }
 
 /**
- * @brief Draws ON/OFF for each item of a menu of toggles, in gold, at the
- * same column on every row.
+ * @brief Draws an item's value in gold, at the same column on every row.
  */
-static void dopo_draw_toggles(const menu_t *def, const dbool *const values[])
+static void dopo_draw_value(const menu_t *def, int item, const char *text)
+{
+  dopo_text(def->x + 180, def->y + LINEHEIGHT*item, text, CR_GOLD);
+}
+
+/**
+ * @brief Draws ON/OFF for the first count items of a menu of toggles.
+ */
+static void dopo_draw_toggles(const menu_t *def, const dbool *const values[], int count)
 {
   int i;
 
-  for (i = 0; i < def->numitems; i++)
-    dopo_text(def->x + 180, def->y + LINEHEIGHT*i, *values[i] ? "ON" : "OFF", CR_GOLD);
+  for (i = 0; i < count; i++)
+    dopo_draw_value(def, i, *values[i] ? "ON" : "OFF");
 }
 
 /**
@@ -280,15 +288,33 @@ static void dopo_toggle_auto_fist(int choice)
   dopo_auto_fist = !dopo_auto_fist;
 }
 
+/**
+ * @brief Patchs routine: Side Walk's double tap window, OFF and 100ms to
+ * 300ms in 50ms steps; right (and confirm) goes up, left goes down, both
+ * wrapping around.
+ */
+static void dopo_adjust_side_walk(int choice)
+{
+  static const int steps[] = { 0, 100, 150, 200, 250, 300 };
+  const int count = sizeof(steps) / sizeof(*steps);
+  int i = 0;
+
+  while (i < count - 1 && steps[i] != dopo_side_walk_ms)
+    i++;
+  i = (i + (choice ? 1 : count - 1)) % count;
+  dopo_side_walk_ms = steps[i];
+}
+
 static menuitem_t dopo_patchs_items[] =
 {
   {1, "", dopo_toggle_action_button, 'a', "Action Button"},
   {1, "", dopo_toggle_auto_fist,     'f', "Auto Fist"},
+  {2, "", dopo_adjust_side_walk,     's', "Side Walk"},
 };
 
 static menu_t dopo_patchs_def =
 {
-  2,
+  3,
   &dopo_dopo_def,
   dopo_patchs_items,
   dopo_draw_patchs,
@@ -299,9 +325,14 @@ static menu_t dopo_patchs_def =
 static void dopo_draw_patchs(void)
 {
   static const dbool *const values[] = { &dopo_action_button, &dopo_auto_fist };
+  char side_walk[16] = "OFF";
+
+  if (dopo_side_walk_ms)
+    snprintf(side_walk, sizeof(side_walk), "%dMS", dopo_side_walk_ms);
 
   dopo_text_centered(15, "PATCHS", CR_DEFAULT);
-  dopo_draw_toggles(&dopo_patchs_def, values);
+  dopo_draw_toggles(&dopo_patchs_def, values, 2);
+  dopo_draw_value(&dopo_patchs_def, 2, side_walk);
 }
 
 static void dopo_open_patchs(int choice)
@@ -350,7 +381,7 @@ static void dopo_draw_cheats(void)
   };
 
   dopo_text_centered(15, "CHEATS", CR_DEFAULT);
-  dopo_draw_toggles(&dopo_cheats_def, values);
+  dopo_draw_toggles(&dopo_cheats_def, values, 3);
 }
 
 static void dopo_open_cheats(int choice)
