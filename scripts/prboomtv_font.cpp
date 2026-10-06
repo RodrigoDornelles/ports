@@ -174,6 +174,22 @@ Bytes encode_patch(int width, int height, std::span<const std::uint8_t> rgba,
     return out;
 }
 
+struct Image {
+    int width = 0;
+    int height = 0;
+    std::vector<std::uint8_t> rgba;
+};
+
+Image load_png(const fs::path& path)
+{
+    int width = 0, height = 0, channels = 0;
+    const std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels{
+        stbi_load(path.string().c_str(), &width, &height, &channels, 4), stbi_image_free};
+    if (!pixels)
+        throw Error{std::format("{}: error: {}", path.string(), stbi_failure_reason())};
+    return {width, height, {pixels.get(), pixels.get() + width * height * 4}};
+}
+
 struct Font {
     std::vector<Glyph> glyphs;
     int height = 0;
@@ -181,25 +197,22 @@ struct Font {
 
 Font load_glyphs(const fs::path& dir, const std::vector<Rgb>& palette)
 {
-    const auto order = search_order();
-    Font font;
+    std::map<int, Image> images;
     for (int index = 1;; ++index) {
         const auto path = dir / std::format("fontb{:02}.png", index);
         if (!fs::exists(path))
             break;
-
-        int width = 0, height = 0, channels = 0;
-        const std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels{
-            stbi_load(path.string().c_str(), &width, &height, &channels, 4), stbi_image_free};
-        if (!pixels)
-            throw Error{std::format("{}: error: {}", path.string(), stbi_failure_reason())};
-
-        const std::span<const std::uint8_t> data{pixels.get(), static_cast<std::size_t>(width * height * 4)};
-        font.glyphs.push_back({first_char + index - 1, encode_patch(width, height, data, palette, order)});
-        font.height = std::max(font.height, height);
+        images[first_char + index - 1] = load_png(path);
     }
-    if (font.glyphs.empty())
+    if (images.empty())
         throw Error{std::format("{}: error: no fontbNN.png glyphs", dir.string())};
+
+    const auto order = search_order();
+    Font font;
+    for (const auto& [code, image] : images) {
+        font.glyphs.push_back({code, encode_patch(image.width, image.height, image.rgba, palette, order)});
+        font.height = std::max(font.height, image.height);
+    }
     return font;
 }
 

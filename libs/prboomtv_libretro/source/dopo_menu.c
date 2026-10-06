@@ -4,7 +4,7 @@
  * Every game gets the Heretic/Hexen main menu: New Game, Game Files,
  * Settings, Quit Game, where New Game turns into Switch Weapon while a level
  * is played. Game Files holds New Game, Load Game, Save Game and Delete
- * Game. Settings leads to Dopo Options (our own settings and Read This!)
+ * Game. Settings leads to Dopo Options (patches, cheats and Read This!)
  * and Game Options (the engine options, without Mouse Sensitivity and with
  * the game's Read This!). Every item is drawn as text in the big font.
  */
@@ -221,17 +221,19 @@ static void dopo_draw_dopo_options(void)
 }
 
 static void dopo_open_patchs(int choice);
+static void dopo_open_cheats(int choice);
 static void dopo_open_about(int choice);
 
 static menuitem_t dopo_dopo_items[] =
 {
   {1, "", dopo_open_patchs, 'p', "Patchs"},
+  {1, "", dopo_open_cheats, 'c', "Cheats"},
   {1, "", dopo_open_about,  'r', "Read This!"},
 };
 
 static menu_t dopo_dopo_def =
 {
-  2,
+  3,
   &dopo_options_def,
   dopo_dopo_items,
   dopo_draw_dopo_options,
@@ -242,6 +244,18 @@ static menu_t dopo_dopo_def =
 static void dopo_open_dopo_options(int choice)
 {
   M_SetupNextMenu(&dopo_dopo_def);
+}
+
+/**
+ * @brief Draws ON/OFF for each item of a menu of toggles, in gold, at the
+ * same column on every row.
+ */
+static void dopo_draw_toggles(const menu_t *def, const dbool *const values[])
+{
+  int i;
+
+  for (i = 0; i < def->numitems; i++)
+    dopo_text(def->x + 180, def->y + LINEHEIGHT*i, *values[i] ? "ON" : "OFF", CR_GOLD);
 }
 
 /**
@@ -274,18 +288,64 @@ static menu_t dopo_patchs_def =
 
 static void dopo_draw_patchs(void)
 {
-  /* FONTB has no brackets */
-  const char *on  = raven ? "ON"  : "[X]";
-  const char *off = raven ? "OFF" : "[ ]";
+  static const dbool *const values[] = { &dopo_action_button };
 
   dopo_text_centered(15, "PATCHS", CR_DEFAULT);
-  dopo_text(dopo_patchs_def.x + 180, dopo_patchs_def.y,
-            dopo_action_button ? on : off, CR_GOLD);
+  dopo_draw_toggles(&dopo_patchs_def, values);
 }
 
 static void dopo_open_patchs(int choice)
 {
   M_SetupNextMenu(&dopo_patchs_def);
+}
+
+/**
+ * @brief Cheats, kept up every tic by dopo_cheats_apply() in libretro.c.
+ */
+extern dbool dopo_cheat_ammo;
+extern dbool dopo_cheat_life;
+extern dbool dopo_cheat_weapons;
+
+static void dopo_toggle_cheat_ammo(int choice)    { dopo_cheat_ammo = !dopo_cheat_ammo; }
+static void dopo_toggle_cheat_life(int choice)    { dopo_cheat_life = !dopo_cheat_life; }
+static void dopo_toggle_cheat_weapons(int choice) { dopo_cheat_weapons = !dopo_cheat_weapons; }
+
+/**
+ * @brief Menu routine: Cheats title and each cheat's state.
+ */
+static void dopo_draw_cheats(void);
+
+static menuitem_t dopo_cheats_items[] =
+{
+  {1, "", dopo_toggle_cheat_ammo,    'a', "Infinite Ammo"},
+  {1, "", dopo_toggle_cheat_life,    'l', "Infinite Life"},
+  {1, "", dopo_toggle_cheat_weapons, 'w', "All Weapons"},
+};
+
+static menu_t dopo_cheats_def =
+{
+  3,
+  &dopo_dopo_def,
+  dopo_cheats_items,
+  dopo_draw_cheats,
+  60,64,
+  0
+};
+
+static void dopo_draw_cheats(void)
+{
+  static const dbool *const values[] =
+  {
+    &dopo_cheat_ammo, &dopo_cheat_life, &dopo_cheat_weapons,
+  };
+
+  dopo_text_centered(15, "CHEATS", CR_DEFAULT);
+  dopo_draw_toggles(&dopo_cheats_def, values);
+}
+
+static void dopo_open_cheats(int choice)
+{
+  M_SetupNextMenu(&dopo_cheats_def);
 }
 
 /**
