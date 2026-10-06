@@ -258,6 +258,31 @@ static void dopo_draw_value(const menu_t *def, int item, const char *text)
 }
 
 /**
+ * @brief Moves value to the next (choice 1: right or confirm) or previous
+ * (choice 0: left) of steps, wrapping around; an unknown value starts
+ * from the first step.
+ */
+static void dopo_cycle(int *value, const int *steps, int count, int choice)
+{
+  int i = 0;
+
+  while (i < count - 1 && steps[i] != *value)
+    i++;
+  *value = steps[(i + (choice ? 1 : count - 1)) % count];
+}
+
+/**
+ * @brief Writes OFF for 0, or the value with its unit (200MS, 10DEG).
+ */
+static void dopo_format_value(char *buf, size_t size, int value, const char *unit)
+{
+  if (value)
+    snprintf(buf, size, "%d%s", value, unit);
+  else
+    snprintf(buf, size, "OFF");
+}
+
+/**
  * @brief Draws ON/OFF for the first count items of a menu of toggles.
  */
 static void dopo_draw_toggles(const menu_t *def, const dbool *const values[], int count)
@@ -305,13 +330,8 @@ static void dopo_toggle_toggle_fire(int choice)
 static void dopo_adjust_side_walk(int choice)
 {
   static const int steps[] = { 0, 100, 150, 200, 250, 300 };
-  const int count = sizeof(steps) / sizeof(*steps);
-  int i = 0;
 
-  while (i < count - 1 && steps[i] != dopo_side_walk_ms)
-    i++;
-  i = (i + (choice ? 1 : count - 1)) % count;
-  dopo_side_walk_ms = steps[i];
+  dopo_cycle(&dopo_side_walk_ms, steps, sizeof(steps) / sizeof(*steps), choice);
 }
 
 static menuitem_t dopo_patchs_items[] =
@@ -338,10 +358,9 @@ static void dopo_draw_patchs(void)
   {
     &dopo_action_button, &dopo_auto_fist, &dopo_toggle_fire,
   };
-  char side_walk[16] = "OFF";
+  char side_walk[16];
 
-  if (dopo_side_walk_ms)
-    snprintf(side_walk, sizeof(side_walk), "%dMS", dopo_side_walk_ms);
+  dopo_format_value(side_walk, sizeof(side_walk), dopo_side_walk_ms, "MS");
 
   dopo_text_centered(15, "PATCHS", CR_DEFAULT);
   dopo_draw_toggles(&dopo_patchs_def, values, 3);
@@ -359,10 +378,30 @@ static void dopo_open_patchs(int choice)
 extern dbool dopo_cheat_ammo;
 extern dbool dopo_cheat_life;
 extern dbool dopo_cheat_weapons;
+extern int dopo_cheat_aim_assist;
+extern int dopo_cheat_trigger_assist;
 
 static void dopo_toggle_cheat_ammo(int choice)    { dopo_cheat_ammo = !dopo_cheat_ammo; }
 static void dopo_toggle_cheat_life(int choice)    { dopo_cheat_life = !dopo_cheat_life; }
 static void dopo_toggle_cheat_weapons(int choice) { dopo_cheat_weapons = !dopo_cheat_weapons; }
+/**
+ * @brief Cheats routines: the assists' openings, OFF and then degrees on
+ * each side of the crosshair, the same steps for both; 45 covers the 4:3
+ * screen and 50 a bit past it.
+ */
+static const int dopo_assist_steps[] = { 0, 5, 10, 15, 20, 30, 40, 50 };
+
+static void dopo_adjust_cheat_aim(int choice)
+{
+  dopo_cycle(&dopo_cheat_aim_assist, dopo_assist_steps,
+             sizeof(dopo_assist_steps) / sizeof(*dopo_assist_steps), choice);
+}
+
+static void dopo_adjust_cheat_trigger(int choice)
+{
+  dopo_cycle(&dopo_cheat_trigger_assist, dopo_assist_steps,
+             sizeof(dopo_assist_steps) / sizeof(*dopo_assist_steps), choice);
+}
 
 /**
  * @brief Menu routine: Cheats title and each cheat's state.
@@ -374,11 +413,13 @@ static menuitem_t dopo_cheats_items[] =
   {1, "", dopo_toggle_cheat_ammo,    'a', "Infinite Ammo"},
   {1, "", dopo_toggle_cheat_life,    'l', "Infinite Life"},
   {1, "", dopo_toggle_cheat_weapons, 'w', "All Weapons"},
+  {2, "", dopo_adjust_cheat_aim,     'i', "Aim Assist"},
+  {2, "", dopo_adjust_cheat_trigger, 't', "Trigger Assist"},
 };
 
 static menu_t dopo_cheats_def =
 {
-  3,
+  5,
   &dopo_dopo_def,
   dopo_cheats_items,
   dopo_draw_cheats,
@@ -392,9 +433,15 @@ static void dopo_draw_cheats(void)
   {
     &dopo_cheat_ammo, &dopo_cheat_life, &dopo_cheat_weapons,
   };
+  char aim[16], trigger[16];
+
+  dopo_format_value(aim, sizeof(aim), dopo_cheat_aim_assist, "DEG");
+  dopo_format_value(trigger, sizeof(trigger), dopo_cheat_trigger_assist, "DEG");
 
   dopo_text_centered(15, "CHEATS", CR_DEFAULT);
   dopo_draw_toggles(&dopo_cheats_def, values, 3);
+  dopo_draw_value(&dopo_cheats_def, 3, aim);
+  dopo_draw_value(&dopo_cheats_def, 4, trigger);
 }
 
 static void dopo_open_cheats(int choice)
