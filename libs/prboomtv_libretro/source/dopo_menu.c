@@ -155,6 +155,7 @@ void M_DrawOptions(void)
 #define DOPO_LINE_HEIGHT  9
 
 extern dbool dopo_action_button;
+extern dbool dopo_auto_fist;
 
 /**
  * @brief Menu routine: title of Settings, the Dopo/Game Options chooser.
@@ -271,14 +272,23 @@ static void dopo_toggle_action_button(int choice)
   dopo_action_button = !dopo_action_button;
 }
 
+/**
+ * @brief Patchs routine: turns Auto Fist on or off.
+ */
+static void dopo_toggle_auto_fist(int choice)
+{
+  dopo_auto_fist = !dopo_auto_fist;
+}
+
 static menuitem_t dopo_patchs_items[] =
 {
   {1, "", dopo_toggle_action_button, 'a', "Action Button"},
+  {1, "", dopo_toggle_auto_fist,     'f', "Auto Fist"},
 };
 
 static menu_t dopo_patchs_def =
 {
-  1,
+  2,
   &dopo_dopo_def,
   dopo_patchs_items,
   dopo_draw_patchs,
@@ -288,7 +298,7 @@ static menu_t dopo_patchs_def =
 
 static void dopo_draw_patchs(void)
 {
-  static const dbool *const values[] = { &dopo_action_button };
+  static const dbool *const values[] = { &dopo_action_button, &dopo_auto_fist };
 
   dopo_text_centered(15, "PATCHS", CR_DEFAULT);
   dopo_draw_toggles(&dopo_patchs_def, values);
