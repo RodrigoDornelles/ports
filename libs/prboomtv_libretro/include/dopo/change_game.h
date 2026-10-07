@@ -19,4 +19,10 @@ dbool dopo_games_is_current(int i);
 /** @brief Asks for a switch to the i-th game at the next frame. */
 void dopo_games_load(int i);
 
+/** @brief Whether a switch waits for the next frame. */
+dbool dopo_games_switching(void);
+
+/** @brief The running game's file name, without directory (or ""). */
+const char *dopo_games_current(void);
+
 #endif

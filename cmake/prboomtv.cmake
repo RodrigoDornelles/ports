@@ -12,6 +12,11 @@ set(STB_VERSION "2c980bb59875b0d32144a71867fbdebb2f77cd20")
 set(STB_DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/${STB_VERSION}/stb_image.h")
 set(STB_DIR "${CMAKE_SOURCE_DIR}/vendor/stb")
 
+# JSON for the netplay lobby's room list (MIT, a single header)
+set(JSMN_VERSION "v1.1.0")
+set(JSMN_DOWNLOAD "https://raw.githubusercontent.com/zserge/jsmn/${JSMN_VERSION}")
+set(JSMN_DIR "${CMAKE_SOURCE_DIR}/vendor/jsmn")
+
 if (NOT EXISTS "${PRBOOM_DIR}/src")
     FetchContent_Populate(prboom URL ${PRBOOM_DOWNLOAD} SOURCE_DIR ${PRBOOM_DIR})
 endif()
@@ -69,6 +74,16 @@ endif()
 
 if (NOT EXISTS "${STB_DIR}/stb_image.h")
     file(DOWNLOAD "${STB_DOWNLOAD}" "${STB_DIR}/stb_image.h")
+endif()
+
+if (NOT EXISTS "${JSMN_DIR}/jsmn.h")
+    foreach(file jsmn.h LICENSE)
+        file(DOWNLOAD "${JSMN_DOWNLOAD}/${file}" "${JSMN_DIR}/${file}" STATUS status)
+        list(GET status 0 code)
+        if (code)
+            message(FATAL_ERROR "prboomtv: failed to download jsmn ${file}: ${status}")
+        endif()
+    endforeach()
 endif()
 
 # upstream Makefile.common (unix, threads on, fluidsynth off)
@@ -343,7 +358,7 @@ target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/inc
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
     "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
-    "${PRBOOMTV_GENERATED}")
+    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}")
 target_compile_definitions(prboomtv_libretro PRIVATE
     HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_THREADS HAVE_MMAP
     INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE

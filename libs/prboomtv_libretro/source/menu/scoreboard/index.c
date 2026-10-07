@@ -49,7 +49,7 @@ menu_t dopo_scoreboard_def =
 
 dbool dopo_menu_draws_cursor(const menu_t *menu)
 {
-  return menu == &dopo_scoreboard_def;
+  return menu == &dopo_scoreboard_def || menu == &dopo_list_def;
 }
 
 /**

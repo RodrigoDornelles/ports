@@ -3,6 +3,8 @@
  * the session starts, where the host sets the mode, skill and level up
  * and starts the game; during the game, the same menu changes them for
  * everyone (Change Level). A two column menu, with the players below.
+ * Outside a session, rooms are created and joined here when the frontend
+ * can (menu/multiplayer/rooms.c), and the lobby can be left (Leave).
  */
 
 /**
@@ -11,12 +13,14 @@
  * @patch src/m_menu.c 5589
  */
 #include "dopo/menu.h"
+#include "dopo/rooms.h"
 
 static void dopo_lobby_draw(void);
 static void dopo_lobby_mode(int choice);
 static void dopo_lobby_skill(int choice);
 static void dopo_lobby_level(int choice);
 static void dopo_lobby_start(int choice);
+static void dopo_lobby_leave(int choice);
 
 static menuitem_t dopo_lobby_items[] =
 {
@@ -24,6 +28,7 @@ static menuitem_t dopo_lobby_items[] =
   {2, "", dopo_lobby_skill, 's', "Skill"},
   {2, "", dopo_lobby_level, 'l', "Level"},
   {1, "", dopo_lobby_start, 'g', "Start"},
+  {1, "", dopo_lobby_leave, 'q', "Leave"},
 };
 
 static menu_t dopo_lobby_def =
@@ -45,6 +50,8 @@ static void dopo_lobby_setup(void)
 
   dopo_lobby_items[3].alttext = game ? "Change Level" : "Start";
   dopo_lobby_def.prevMenu = game ? M_MainMenuDef() : NULL;
+  /* leaving is the frontend's to do: only when it hosts rooms for us */
+  dopo_lobby_def.numitems = dopo_rooms_available() ? 5 : 4;
 }
 
 void dopo_lobby_open(void)
@@ -59,7 +66,10 @@ void dopo_multiplayer_open(int choice)
 {
   if (dopo_mp_state() == DOPO_MP_OFF)
   {
-    M_StartMessage(DOPO_MP_NO_SESSION, NULL, FALSE);
+    if (dopo_rooms_available())
+      dopo_rooms_menu_open();
+    else
+      M_StartMessage(DOPO_MP_NO_SESSION, NULL, FALSE);
     return;
   }
   dopo_lobby_setup();
@@ -137,6 +147,12 @@ static void dopo_lobby_level(int choice)
   c.episode = i / maps + 1;
   c.map = i % maps + 1;
   dopo_mp_set_config(&c);
+}
+
+static void dopo_lobby_leave(int choice)
+{
+  dopo_rooms_leave();
+  M_ClearMenus();
 }
 
 static void dopo_lobby_start(int choice)

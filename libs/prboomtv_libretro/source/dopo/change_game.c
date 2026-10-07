@@ -17,6 +17,7 @@
  * @patch libretro/libretro.c 1776
  */
 #include "dopo/change_game.h"
+#include "dopo/rooms.h"
 
 #define DOPO_GAMES_MAX  64
 #define DOPO_GAME_PATH  512
@@ -116,6 +117,22 @@ void dopo_games_load(int i)
    strlcpy(dopo_game_pending, dopo_games[i], sizeof(dopo_game_pending));
 }
 
+/**
+ * @brief Whether a switch was asked for and not done yet.
+ */
+dbool dopo_games_switching(void)
+{
+   return dopo_game_pending[0] != 0;
+}
+
+/**
+ * @brief The running game's file name.
+ */
+const char *dopo_games_current(void)
+{
+   return path_basename(dopo_game_current);
+}
+
 static void dopo_upstream_run(void);
 static bool dopo_upstream_load_game(const struct retro_game_info *info);
 
@@ -140,7 +157,8 @@ static void dopo_game_switch(void)
 /**
  * @brief Runs a frame, switching games first when one was asked for; after
  * a failed switch nothing is loaded, so frames are skipped until the
- * frontend shuts down.
+ * frontend shuts down. A room joined from the room list waits for the
+ * switch to its game, so it goes after it (dopo_rooms_frame()).
  */
 void retro_run(void)
 {
@@ -150,7 +168,10 @@ void retro_run(void)
       dopo_game_pending[0] = 0;
    }
    if (!dopo_game_failed)
+   {
+      dopo_rooms_frame();
       dopo_upstream_run();
+   }
 }
 
 /* @endpatch */

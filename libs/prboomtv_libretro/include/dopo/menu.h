@@ -135,6 +135,10 @@ void dopo_delete_open(int choice);
 /* menu/multiplayer/index.c */
 void dopo_multiplayer_open(int choice);
 
+/* menu/multiplayer/rooms.c */
+extern menu_t dopo_list_def;
+void dopo_rooms_menu_open(void);
+
 /* menu/scoreboard/index.c */
 extern menu_t dopo_scoreboard_def;
 void dopo_scoreboard_open(int choice);
