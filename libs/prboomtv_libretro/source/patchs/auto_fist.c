@@ -25,6 +25,8 @@
  * @brief Whether Auto Fist is on; toggled from Dopo Options > Patchs and
  * not saved.
  */
+#include "dopo/patchs.h"
+
 dbool dopo_auto_fist = TRUE;
 
 static dbool        dopo_fist_active[MAXPLAYERS]; /* fist put in hand by us */

@@ -31,6 +31,8 @@
  * toggled from Dopo Options > Patchs and not saved. When off, the button
  * does what its layout binds it to.
  */
+#include "dopo/patchs.h"
+
 dbool dopo_action_button = TRUE;
 
 /**

@@ -21,6 +21,8 @@
 /**
  * @brief Window in milliseconds, 0 = off; not saved.
  */
+#include "dopo/patchs.h"
+
 int dopo_side_walk_ms = 200;
 
 /**

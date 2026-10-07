@@ -9,7 +9,8 @@
  * itself does not turn. Trigger Assist: fires on its own while a monster is
  * within its opening.
  * Both skip friends and anything that is not a monster (barrels), and are
- * off in demos and netgames, where they would desync.
+ * off in demos. In a netgame the host sets them for every player
+ * (multiplayer/settings.c).
  */
 
 /**
@@ -17,11 +18,7 @@
  *
  * @patch src/p_pspr.c 2519
  */
-/**
- * @brief Openings in degrees on each side of the crosshair, 0 = off.
- */
-int dopo_cheat_aim_assist;
-int dopo_cheat_trigger_assist;
+#include "dopo/cheats.h"
 
 static dbool  dopo_aim_assisted;
 static angle_t dopo_aim_angle;
@@ -31,7 +28,7 @@ static angle_t dopo_aim_angle;
  */
 static dbool dopo_assist_allowed(const player_t *player)
 {
-   return !demoplayback && !netgame && player->mo && player->health > 0;
+   return !demoplayback && player->mo && player->health > 0;
 }
 
 /**
@@ -75,11 +72,11 @@ static mobj_t *dopo_assist_target(player_t *player, int degrees)
  */
 static void dopo_trigger_assist_update(player_t *player)
 {
-   if (!dopo_cheat_trigger_assist || !dopo_assist_allowed(player) ||
+   if (!dopo_cheats.trigger_assist || !dopo_assist_allowed(player) ||
        player->pendingweapon != WP_NOCHANGE)
       return;
 
-   if (dopo_assist_target(player, dopo_cheat_trigger_assist))
+   if (dopo_assist_target(player, dopo_cheats.trigger_assist))
       player->cmd.buttons |= BT_ATTACK;
 }
 
@@ -94,11 +91,11 @@ static angle_t dopo_aim_assist_begin(player_t *player)
    mobj_t *target;
 
    dopo_aim_assisted = FALSE;
-   if (!dopo_cheat_aim_assist || !dopo_assist_allowed(player) ||
+   if (!dopo_cheats.aim_assist || !dopo_assist_allowed(player) ||
        !((player->cmd.buttons & BT_ATTACK) || player->attackdown))
       return angle;
 
-   target = dopo_assist_target(player, dopo_cheat_aim_assist);
+   target = dopo_assist_target(player, dopo_cheats.aim_assist);
    if (!target)
       return angle;
 

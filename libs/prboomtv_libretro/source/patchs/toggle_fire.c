@@ -22,6 +22,8 @@
  * @brief Whether Toggle Fire is on; toggled from Dopo Options > Patchs and
  * not saved.
  */
+#include "dopo/patchs.h"
+
 dbool dopo_toggle_fire = TRUE;
 
 static dbool        dopo_fire_held[MAXPLAYERS];     /* button down last tic */

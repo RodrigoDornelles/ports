@@ -1,18 +1,19 @@
 /**
- * @brief Switch Weapon: lists the collected weapons with their ammo and
- * raises the chosen one.
+ * @brief Change Weapon: lists the collected weapons with their ammo and
+ * raises the chosen one, through the ticcmd.
  *
- * Opened from the main menu (see dopo/menus.c) while a level is played.
- * Names are drawn in the big font of the game, ammo in gold.
+ * Opened from the main menu while a level is played. A two column menu:
+ * names in the big font of the game, ammo in gold.
  */
 
 /**
- * @brief Switch Weapon submenu.
+ * @brief Change Weapon submenu.
  *
  * @patch src/m_menu.c 5589
  */
+#include "dopo/menu.h"
+
 #define DOPO_WEAPON_HEXEN_SLOTS 4
-#define DOPO_WEAPON_AMMO_RIGHT  288
 
 /**
  * @brief A weapon and its menu name, listed in weapon slot order.
@@ -68,7 +69,7 @@ static menu_t dopo_weapon_def =
   NULL,
   dopo_weapon_items,
   dopo_draw_weapons,
-  48,40,
+  DOPO_MENU_LEFT, DOPO_MENU_TOP,
   0
 };
 
@@ -110,7 +111,8 @@ static void dopo_draw_weapons(void)
 {
   int i;
 
-  dopo_text_centered(15, "SWITCH WEAPON", CR_DEFAULT);
+  dopo_menu_big(&dopo_weapon_def);
+  dopo_menu_title("CHANGE WEAPON");
 
   for (i = 0; i < dopo_weapon_def.numitems; i++)
   {
@@ -118,30 +120,32 @@ static void dopo_draw_weapons(void)
     const char *ammo = dopo_weapon_ammo(dopo_weapon_slots[i], buf, sizeof(buf));
 
     if (ammo)
-      dopo_text(DOPO_WEAPON_AMMO_RIGHT - dopo_text_width(ammo),
-                dopo_weapon_def.y + i * LINEHEIGHT, ammo, CR_GOLD);
+      dopo_menu_value(&dopo_weapon_def, i, ammo, CR_GOLD);
   }
 }
 
 /**
+ * @brief Weapon chosen in the submenu, sent by the next ticcmd.
+ */
+weapontype_t dopo_weapon_request = WP_NOCHANGE;
+
+/**
  * @brief Item routine: raises the chosen weapon the way a weapon key does,
- * leaving the actual swap to A_WeaponReady, and returns to the game.
+ * through the ticcmd (so a netgame changes it on every machine), leaving
+ * the actual swap to A_WeaponReady, and returns to the game.
  */
 static void dopo_choose_weapon(int choice)
 {
-  player_t *player = &players[consoleplayer];
   weapontype_t weapon = dopo_weapon_slots[choice];
 
-  if (!player->morphTics && !player->chickenTics &&
-      weapon != player->readyweapon)
-    player->pendingweapon = weapon;
+  if (weapon != players[consoleplayer].readyweapon)
+    dopo_weapon_request = weapon;
 
   M_ClearMenus();
 }
 
 /**
- * @brief Appends a weapon to the submenu when the player owns it, placing
- * the cursor on the weapon in hand.
+ * @brief Appends a weapon to the submenu when the player owns it.
  */
 static void dopo_add_weapon(weapontype_t weapon, const char *name)
 {
@@ -157,8 +161,6 @@ static void dopo_add_weapon(weapontype_t weapon, const char *name)
 
   dopo_weapon_items[n] = (menuitem_t){ 1, "", dopo_choose_weapon, 0, name };
   dopo_weapon_slots[n] = weapon;
-  if (weapon == player->readyweapon)
-    dopo_weapon_def.lastOn = n;
   dopo_weapon_def.numitems++;
 }
 
@@ -166,7 +168,7 @@ static void dopo_add_weapon(weapontype_t weapon, const char *name)
  * @brief Main menu routine: lists the collected weapons for the current
  * game and opens the submenu.
  */
-static void dopo_switch_weapon(int choice)
+void dopo_change_weapon_open(int choice)
 {
   player_t *player = &players[consoleplayer];
   size_t i;
@@ -175,7 +177,6 @@ static void dopo_switch_weapon(int choice)
     return;
 
   dopo_weapon_def.numitems = 0;
-  dopo_weapon_def.lastOn = 0;
   dopo_weapon_def.prevMenu = M_MainMenuDef();
 
   if (hexen)
@@ -196,7 +197,31 @@ static void dopo_switch_weapon(int choice)
   }
 
   if (dopo_weapon_def.numitems)
-    M_SetupNextMenu(&dopo_weapon_def);
+    dopo_menu_open(&dopo_weapon_def);
 }
+
+/* @endpatch */
+
+/**
+ * @brief Turns the weapon chosen in the submenu into a weapon change of
+ * the ticcmd, over any weapon key of the same tic; P_PlayerThink still
+ * skips it while morphed.
+ *
+ * @patch src/g_game.c 580
+ */
+  if (dopo_weapon_request != WP_NOCHANGE)
+  {
+    newweapon = dopo_weapon_request;
+    dopo_weapon_request = WP_NOCHANGE;
+  }
+
+/* @endpatch */
+
+/**
+ * @brief The weapon request, for G_BuildTiccmd.
+ *
+ * @patch src/g_game.c 311
+ */
+#include "dopo/change_weapon.h"
 
 /* @endpatch */

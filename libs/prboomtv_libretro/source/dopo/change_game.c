@@ -16,6 +16,8 @@
  *
  * @patch libretro/libretro.c 1776
  */
+#include "dopo/change_game.h"
+
 #define DOPO_GAMES_MAX  64
 #define DOPO_GAME_PATH  512
 

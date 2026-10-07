@@ -1,17 +1,12 @@
 /**
  * @brief Cheats toggled from Dopo Options > Cheats: infinite ammo,
- * infinite life and all weapons, kept up every tic while a level is
- * played (never during demos or netgames, which would desync).
+ * infinite life and all weapons, kept up for every player at the start of
+ * every tic a level is played (never during demos). In a netgame the host
+ * sets them for everyone (multiplayer/settings.c).
  */
-
-/**
- * @brief Cheat toggles, read by the Cheats menu, and their per-tic upkeep.
- *
- * @patch libretro/libretro.c 3742
- */
-dbool dopo_cheat_ammo;
-dbool dopo_cheat_life;
-dbool dopo_cheat_weapons;
+#include "doomstat.h"
+#include "d_player.h"
+#include "dopo/cheats.h"
 
 /**
  * @brief Gives every weapon the game has, with the same rules as IDFA
@@ -23,7 +18,7 @@ static void dopo_cheat_give_weapons(player_t *player)
 
    if (hexen)
    {
-      for (i = WP_FIRST; i <= WP_FOURTH; i++)
+      for (i = WP_FIRST; i <= (int)WP_FOURTH; i++)
          player->weaponowned[i] = TRUE;
       return;
    }
@@ -53,42 +48,34 @@ static void dopo_cheat_fill_ammo(player_t *player)
 }
 
 /**
- * @brief Applies the cheats that are on to the console player. Infinite
- * life is god mode (CF_GODMODE, as IDDQD), cleared once when turned off.
+ * @brief Applies the cheats that are on to every player in the game.
+ * Infinite life is god mode (CF_GODMODE, as IDDQD), cleared once when
+ * turned off.
  */
-static void dopo_cheats_apply(void)
+void dopo_cheats_tic(void)
 {
    static dbool life_was_on;
-   player_t *player = &players[consoleplayer];
+   int i;
 
-   if (gamestate != GS_LEVEL || demoplayback || netgame || !player->mo)
+   if (gamestate != GS_LEVEL || demoplayback)
       return;
 
-   if (dopo_cheat_life)
-      player->cheats |= CF_GODMODE;
-   else if (life_was_on)
-      player->cheats &= ~CF_GODMODE;
-   life_was_on = dopo_cheat_life;
+   for (i = 0; i < MAXPLAYERS; i++)
+   {
+      player_t *player = &players[i];
 
-   if (dopo_cheat_weapons)
-      dopo_cheat_give_weapons(player);
-   if (dopo_cheat_ammo)
-      dopo_cheat_fill_ammo(player);
+      if (!playeringame[i] || !player->mo)
+         continue;
+
+      if (dopo_cheats.life)
+         player->cheats |= CF_GODMODE;
+      else if (life_was_on)
+         player->cheats &= ~CF_GODMODE;
+
+      if (dopo_cheats.weapons)
+         dopo_cheat_give_weapons(player);
+      if (dopo_cheats.ammo)
+         dopo_cheat_fill_ammo(player);
+   }
+   life_was_on = dopo_cheats.life;
 }
-
-/* @endpatch */
-
-/**
- * @brief Polls input, then keeps the cheats up, once per tic.
- *
- * @patch libretro/libretro.c 3742-3748
- */
-void I_StartTic(void)
-{
-   if (!input_poll_cb)
-      return;
-   input_poll_cb();
-   process_input();
-   dopo_cheats_apply();
-}
-/* @endpatch */
