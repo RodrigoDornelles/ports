@@ -2,7 +2,7 @@ set(PRBOOM_VERSION "c6e0fcb8325fc7969c91387f56c63433de0f1a53")
 set(PRBOOM_DOWNLOAD "https://github.com/libretro/libretro-prboom/archive/${PRBOOM_VERSION}.tar.gz")
 set(PRBOOM_DIR "${CMAKE_SOURCE_DIR}/vendor/prboom")
 
-set(PRBOOMTV_DIR "${CMAKE_CURRENT_LIST_DIR}/../libs/prboomtv_libretro")
+get_filename_component(PRBOOMTV_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 set(ODAMEX_VERSION "3063c2e8fd8938ad16736c6715c5e83142d640a4")
 set(ODAMEX_DOWNLOAD "https://raw.githubusercontent.com/odamex/odamex/${ODAMEX_VERSION}")
@@ -256,18 +256,18 @@ set(prboomtv_upstream_files
     libretro/libretro-common/rthreads/retro_eventcount.c
 )
 
-# files in source/ either carry /** @patch */ hunks applied on top of upstream
+# files in library/core/ either carry /** @patch */ hunks applied on top of upstream
 # files (see scripts/prboomtv_patchs.cpp), or mirror the upstream layout and
 # replace the original ones, or are new files compiled as they are
 file(GLOB_RECURSE prboomtv_source_files CONFIGURE_DEPENDS
-    RELATIVE "${PRBOOMTV_DIR}/source" "${PRBOOMTV_DIR}/source/*.c")
+    RELATIVE "${PRBOOMTV_DIR}/library/core" "${PRBOOMTV_DIR}/library/core/*.c")
 
 set(prboomtv_patch_files "")
 set(prboomtv_override_files "")
 foreach(file ${prboomtv_source_files})
-    file(STRINGS "${PRBOOMTV_DIR}/source/${file}" patch_marks REGEX "@patch[ \t]")
+    file(STRINGS "${PRBOOMTV_DIR}/library/core/${file}" patch_marks REGEX "@patch[ \t]")
     if (patch_marks)
-        list(APPEND prboomtv_patch_files "${PRBOOMTV_DIR}/source/${file}")
+        list(APPEND prboomtv_patch_files "${PRBOOMTV_DIR}/library/core/${file}")
     else()
         list(APPEND prboomtv_override_files "${file}")
     endif()
@@ -295,7 +295,7 @@ endfunction()
 
 # the Odamex big font, converted into an embedded WAD for the menus
 set(PRBOOMTV_GENERATED "${CMAKE_BINARY_DIR}/prboomtv/generated")
-prboomtv_host_tool(prboomtv_font "${CMAKE_SOURCE_DIR}/scripts/prboomtv_font.cpp" -isystem "${STB_DIR}")
+prboomtv_host_tool(prboomtv_font "${PRBOOMTV_DIR}/scripts/prboomtv_font.cpp" -isystem "${STB_DIR}")
 execute_process(
     COMMAND "${prboomtv_font_TOOL}"
         --glyphs "${ODAMEX_DIR}/wad/graphics"
@@ -308,7 +308,7 @@ if (prboomtv_font_result)
     message(FATAL_ERROR "prboomtv: failed to convert the Odamex font\n${prboomtv_font_error}")
 endif()
 
-prboomtv_host_tool(prboomtv_patchs "${CMAKE_SOURCE_DIR}/scripts/prboomtv_patchs.cpp")
+prboomtv_host_tool(prboomtv_patchs "${PRBOOMTV_DIR}/scripts/prboomtv_patchs.cpp")
 set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_patch_files})
@@ -330,7 +330,7 @@ foreach(file ${prboomtv_patched_files})
     if (NOT file IN_LIST prboomtv_upstream_files)
         message(FATAL_ERROR "prboomtv: ${file} is patched but is not compiled by the core")
     elseif (file IN_LIST prboomtv_override_files)
-        message(FATAL_ERROR "prboomtv: ${file} is both patched and replaced in source/")
+        message(FATAL_ERROR "prboomtv: ${file} is both patched and replaced in library/core/")
     endif()
     # the patched copy lives in the build tree, so its quoted includes need
     # the original directory to keep resolving like upstream
@@ -339,7 +339,7 @@ foreach(file ${prboomtv_patched_files})
 endforeach()
 foreach(file ${prboomtv_upstream_files})
     if (file IN_LIST prboomtv_override_files)
-        list(APPEND prboomtv_files "${PRBOOMTV_DIR}/source/${file}")
+        list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
     elseif (file IN_LIST prboomtv_patched_files)
         list(APPEND prboomtv_files "${PRBOOMTV_PATCHS_OUTPUT}/${file}")
     else()
@@ -348,7 +348,7 @@ foreach(file ${prboomtv_upstream_files})
 endforeach()
 foreach(file ${prboomtv_override_files})
     if (NOT file IN_LIST prboomtv_upstream_files)
-        list(APPEND prboomtv_files "${PRBOOMTV_DIR}/source/${file}")
+        list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
     endif()
 endforeach()
 list(REMOVE_DUPLICATES prboomtv_patched_dirs)

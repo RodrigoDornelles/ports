@@ -1,5 +1,5 @@
 /**
- * @brief Cheats from Dopo Options > Cheats (source/cheats/), set through
+ * @brief Cheats from Dopo Options > Cheats (library/core/cheats/), set through
  * multiplayer/settings.c so a netgame changes them on every machine at
  * the same tic.
  */

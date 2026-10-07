@@ -1,6 +1,6 @@
 /**
  * @brief Patchs: each patch with its state, a two column menu
- * (source/patchs/).
+ * (library/core/patchs/).
  */
 
 /**

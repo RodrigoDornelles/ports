@@ -25,5 +25,5 @@ if (PORTS_USE_SDL_LIBRETRO)
 endif()
 
 if (PORTS_USE_PRBOOMTV_LIBRETRO)
-    include(cmake/prboomtv.cmake)
+    include(prboomtv_libretro/cmake/prboomtv.cmake)
 endif()

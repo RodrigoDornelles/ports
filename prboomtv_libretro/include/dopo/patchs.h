@@ -1,6 +1,6 @@
 /**
  * @brief Patchs toggled from Dopo Options > Patchs, not saved
- * (source/patchs/).
+ * (library/core/patchs/).
  */
 #ifndef DOPO_PATCHS_H
 #define DOPO_PATCHS_H

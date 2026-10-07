@@ -1,6 +1,6 @@
 /**
  * @brief Cheats: each cheat with its state, a two column menu
- * (source/cheats/). The values go through multiplayer/settings.c, so in a
+ * (library/core/cheats/). The values go through multiplayer/settings.c, so in a
  * netgame only the host changes them, for everyone at the same tic.
  */
 

@@ -1,5 +1,5 @@
 /**
- * @brief Dopo menus (source/menu/), one folder per layer of the menu tree:
+ * @brief Dopo menus (library/core/menu/), one folder per layer of the menu tree:
  *
  *   menu/index.c                 main menu
  *   menu/change_weapon/          Change Weapon
