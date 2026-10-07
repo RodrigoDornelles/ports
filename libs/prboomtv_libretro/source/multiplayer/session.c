@@ -16,6 +16,7 @@
 #include "lprintf.h"
 #include "dopo/cheats.h"
 #include "dopo/multiplayer.h"
+#include "dopo/version.h"
 
 void M_StartMessage(const char *string, void *routine, dbool input);
 void M_ClearMenus(void);
@@ -30,6 +31,11 @@ extern dbool quit_pressed;
 /* TIC: type, tic, slot, then the ticcmd */
 #define DOPO_TIC_CMD  6
 #define DOPO_TIC_SIZE (DOPO_TIC_CMD + 10)
+
+/* HELLO: type, name, core version; REJECT: type, the host's version */
+#define DOPO_HELLO_VERSION (1 + DOPO_MP_NAME + 1)
+#define DOPO_HELLO_SIZE    (DOPO_HELLO_VERSION + DOPO_MP_VERSION + 1)
+#define DOPO_REJECT_SIZE   (1 + DOPO_MP_VERSION + 1)
 
 /* ROSTER: type, then per slot: used, admin, client id, name */
 #define DOPO_ROSTER_SLOT (4 + DOPO_MP_NAME + 1)
@@ -70,6 +76,13 @@ static struct
   uint8_t packet[DOPO_LEVEL_SIZE];
 } dopo_events[DOPO_EVENTS];
 static int dopo_events_count;
+
+/**
+ * @brief Host: clients refused for their version whose HELLO came before
+ * the frontend reported them connected, refused again then.
+ */
+static uint16_t dopo_rejected[8];
+static int      dopo_rejected_count;
 
 static int   dopo_deaths[MAXPLAYERS];
 static dbool dopo_was_dead[MAXPLAYERS];
@@ -577,6 +590,7 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
   dopo_send = send;
   dopo_state = DOPO_MP_LOBBY;
   dopo_start_pending = FALSE;
+  dopo_rejected_count = 0;
   dopo_config.skill = defaultskill - 1;
   lprintf(LO_INFO, "dopo_mp: session started as %s (client %u)\n",
           self == DOPO_MP_HOST ? "host" : "client", self);
@@ -594,12 +608,13 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
   }
   else
   {
-    uint8_t p[1 + DOPO_MP_NAME + 1];
+    uint8_t p[DOPO_HELLO_SIZE];
 
     memset(p, 0, sizeof(p));
     p[0] = DOPO_MP_HELLO;
     if (name)
       strncpy((char *)p + 1, name, DOPO_MP_NAME);
+    strncpy((char *)p + DOPO_HELLO_VERSION, DOPO_VERSION, DOPO_MP_VERSION);
     dopo_send(DOPO_MP_HOST, p, sizeof(p));
   }
 }
@@ -630,8 +645,32 @@ static int dopo_host_join(uint16_t client)
   return -1;
 }
 
+/**
+ * @brief Host: tells a client its version is not the host's.
+ */
+static void dopo_send_reject(uint16_t client)
+{
+  uint8_t reject[DOPO_REJECT_SIZE];
+
+  memset(reject, 0, sizeof(reject));
+  reject[0] = DOPO_MP_REJECT;
+  strncpy((char *)reject + 1, DOPO_VERSION, DOPO_MP_VERSION);
+  dopo_send(client, reject, sizeof(reject));
+}
+
 dbool dopo_mp_on_connected(uint16_t client)
 {
+  int i;
+
+  /* refused on its HELLO: say so now that it can be reached, and drop it */
+  for (i = 0; i < dopo_rejected_count; i++)
+    if (dopo_rejected[i] == client)
+    {
+      dopo_rejected[i] = dopo_rejected[--dopo_rejected_count];
+      dopo_send_reject(client);
+      return FALSE;
+    }
+
   if (dopo_host_join(client) < 0)
     return FALSE;
   /* a HELLO that came first got a slot, but the frontend only delivers
@@ -682,8 +721,43 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
     case DOPO_MP_HELLO:
       if (host && (i = dopo_host_join(from)) >= 0)
       {
-        dopo_set_name(i, (const char *)p + 1, len - 1);
+        char version[DOPO_MP_VERSION + 1] = "";
+
+        if (len >= DOPO_HELLO_SIZE)
+          memcpy(version, p + DOPO_HELLO_VERSION, DOPO_MP_VERSION);
+
+        /* another version would desync: RetroArch only warns about it */
+        if (strcmp(version, DOPO_VERSION))
+        {
+          lprintf(LO_INFO, "dopo_mp: refused a client of version '%s'\n", version);
+          dopo_slots[i].used = FALSE;
+          dopo_send_reject(from);
+          if (dopo_rejected_count < (int)(sizeof(dopo_rejected) / sizeof(*dopo_rejected)))
+            dopo_rejected[dopo_rejected_count++] = from;
+          dopo_send_roster();
+          break;
+        }
+        dopo_set_name(i, (const char *)p + 1, DOPO_MP_NAME);
         dopo_send_roster();
+      }
+      break;
+
+    case DOPO_MP_REJECT:
+      if (!host)
+      {
+        static char message[128];
+        char version[DOPO_MP_VERSION + 1] = "";
+
+        if (len >= DOPO_REJECT_SIZE)
+          memcpy(version, p + 1, DOPO_MP_VERSION);
+        snprintf(message, sizeof(message),
+                 "The host runs PrBoomTV %s,\nthis is PrBoomTV %s.\n\nPress a key.",
+                 version, DOPO_VERSION);
+        lprintf(LO_INFO, "dopo_mp: refused by a host of version '%s'\n", version);
+        dopo_state = DOPO_MP_OFF;
+        dopo_send = NULL;
+        M_ClearMenus();
+        M_StartMessage(message, NULL, FALSE);
       }
       break;
 

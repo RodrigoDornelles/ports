@@ -16,6 +16,37 @@ if (NOT EXISTS "${PRBOOM_DIR}/src")
     FetchContent_Populate(prboom URL ${PRBOOM_DOWNLOAD} SOURCE_DIR ${PRBOOM_DIR})
 endif()
 
+# version major: PrBoom's own (PACKAGE_VERSION in its config.h)
+file(STRINGS "${PRBOOM_DIR}/src/config.h" prboom_package_version
+    REGEX "^#define PACKAGE_VERSION \"[0-9]+\.")
+if (NOT prboom_package_version MATCHES "\"([0-9]+)\.")
+    message(FATAL_ERROR "prboomtv: no PACKAGE_VERSION in ${PRBOOM_DIR}/src/config.h")
+endif()
+set(PRBOOMTV_VERSION_MAJOR "${CMAKE_MATCH_1}")
+
+# version patch: the upstream commit's date as yymmdd (committer date,
+# UTC), e.g. 261005 for 2026-10-05; the date is asked to GitHub once per
+# commit and kept next to the sources
+set(PRBOOM_DATE_FILE "${PRBOOM_DIR}/.prboomtv-date-${PRBOOM_VERSION}")
+if (NOT EXISTS "${PRBOOM_DATE_FILE}")
+    set(prboom_commit_json "${CMAKE_BINARY_DIR}/prboomtv/commit.json")
+    file(DOWNLOAD "https://api.github.com/repos/libretro/libretro-prboom/commits/${PRBOOM_VERSION}"
+        "${prboom_commit_json}" STATUS status)
+    list(GET status 0 code)
+    if (code)
+        message(FATAL_ERROR "prboomtv: failed to get the date of commit ${PRBOOM_VERSION}: ${status}")
+    endif()
+    file(READ "${prboom_commit_json}" prboom_commit)
+    string(JSON prboom_date GET "${prboom_commit}" commit committer date)
+    file(WRITE "${PRBOOM_DATE_FILE}" "${prboom_date}")
+endif()
+file(READ "${PRBOOM_DATE_FILE}" prboom_date)
+if (NOT prboom_date MATCHES "^[0-9][0-9]([0-9][0-9])-([0-9][0-9])-([0-9][0-9])")
+    message(FATAL_ERROR "prboomtv: unexpected commit date '${prboom_date}' in ${PRBOOM_DATE_FILE}")
+endif()
+set(PRBOOMTV_VERSION_PATCH "${CMAKE_MATCH_1}${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
+message(STATUS "prboomtv: based on libretro-prboom ${PRBOOM_VERSION} of ${prboom_date}: version major ${PRBOOMTV_VERSION_MAJOR}, patch ${PRBOOMTV_VERSION_PATCH}")
+
 # only the Odamex big font (FONTB01..63, '!'..'_'), its palette and license;
 # the whole repository would be ~80MB for a few kilobytes of glyphs
 if (NOT EXISTS "${ODAMEX_DIR}/LICENSE")
@@ -315,7 +346,8 @@ target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOMTV_GENERATED}")
 target_compile_definitions(prboomtv_libretro PRIVATE
     HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_THREADS HAVE_MMAP
-    INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE)
+    INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE
+    DOPO_VERSION_MAJOR=${PRBOOMTV_VERSION_MAJOR} DOPO_VERSION_PATCH=${PRBOOMTV_VERSION_PATCH})
 target_compile_options(prboomtv_libretro PRIVATE -Wall -W -Wno-unused-parameter -fomit-frame-pointer)
 target_link_libraries(prboomtv_libretro PRIVATE m pthread)
 set_target_properties(prboomtv_libretro PROPERTIES

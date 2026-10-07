@@ -14,6 +14,7 @@
  * @patch libretro/libretro.c 908
  */
 #include "dopo/multiplayer.h"
+#include "dopo/version.h"
 
 static retro_netpacket_send_t dopo_netpacket_send_fn;
 
@@ -61,7 +62,8 @@ static void RETRO_CALLCONV dopo_netpacket_disconnected(uint16_t client_id)
    dopo_mp_on_disconnected(client_id);
 }
 
-/* protocol_version: RetroArch only joins cores that speak the same one */
+/* protocol_version: the core's version; RetroArch only warns when it
+ * differs, so the session's HELLO checks it too (multiplayer/session.c) */
 static const struct retro_netpacket_callback dopo_netpacket_callback =
 {
    dopo_netpacket_start,
@@ -70,7 +72,7 @@ static const struct retro_netpacket_callback dopo_netpacket_callback =
    dopo_netpacket_poll,
    dopo_netpacket_connected,
    dopo_netpacket_disconnected,
-   "prboomtv-mp-1"
+   DOPO_VERSION
 };
 
 /* @endpatch */

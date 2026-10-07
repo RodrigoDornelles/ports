@@ -28,7 +28,7 @@
  */
 typedef enum
 {
-  DOPO_MP_HELLO = 1, /* client to host: name */
+  DOPO_MP_HELLO = 1, /* client to host: name and core version */
   DOPO_MP_ROSTER,    /* host to all: slots, client ids and names */
   DOPO_MP_CONFIG,    /* host to all: mode, skill and level being set up */
   DOPO_MP_START,     /* host to all: the game starts, with its options */
@@ -41,8 +41,12 @@ typedef enum
   DOPO_MP_LEVEL,     /* host to all: mode, skill and level change at a tic */
   DOPO_MP_PING,      /* host to a client, echoed back: round trip time */
   DOPO_MP_PINGS,     /* host to all: every player's ping */
-  DOPO_MP_TELEPORT   /* host to all: a player goes next to another at a tic */
+  DOPO_MP_TELEPORT,  /* host to all: a player goes next to another at a tic */
+  DOPO_MP_REJECT     /* host to a client: other core version (the host's) */
 } dopo_mp_packet_t;
+
+/** @brief Longest core version in a packet, without the terminator. */
+#define DOPO_MP_VERSION 23
 
 /** @brief Admin actions on a player (DOPO_MP_ADMIN). */
 typedef enum
