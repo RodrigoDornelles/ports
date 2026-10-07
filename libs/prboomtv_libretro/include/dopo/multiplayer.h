@@ -35,12 +35,13 @@ typedef enum
   DOPO_MP_TIC,       /* a player's ticcmd for a tic */
   DOPO_MP_CHEATS,    /* host to all: cheats from a tic on */
   DOPO_MP_LEAVE,     /* host to all: a player is gone from a tic on */
-  DOPO_MP_ADMIN,     /* admin to host: an action on a player */
+  DOPO_MP_ADMIN,     /* admin to host: an action on a player (and target) */
   DOPO_MP_KICK,      /* host to a client: leave (the core exits) */
   DOPO_MP_KILL,      /* host to all: a player dies at a tic */
   DOPO_MP_LEVEL,     /* host to all: mode, skill and level change at a tic */
   DOPO_MP_PING,      /* host to a client, echoed back: round trip time */
-  DOPO_MP_PINGS      /* host to all: every player's ping */
+  DOPO_MP_PINGS,     /* host to all: every player's ping */
+  DOPO_MP_TELEPORT   /* host to all: a player goes next to another at a tic */
 } dopo_mp_packet_t;
 
 /** @brief Admin actions on a player (DOPO_MP_ADMIN). */
@@ -48,7 +49,8 @@ typedef enum
 {
   DOPO_MP_ADMIN_TOGGLE = 1, /* promote to admin, or remove admin */
   DOPO_MP_ADMIN_KICK,
-  DOPO_MP_ADMIN_KILL
+  DOPO_MP_ADMIN_KILL,
+  DOPO_MP_ADMIN_TELEPORT  /* the player goes next to the target player */
 } dopo_mp_admin_t;
 
 /** @brief Longest player name, without the terminator. */
@@ -191,10 +193,11 @@ int dopo_mp_self_slot(void);
 dbool dopo_mp_is_admin(void);
 
 /**
- * @brief Asks for an admin action on a player: done right away on the
+ * @brief Asks for an admin action on a player (target: the other player
+ * of DOPO_MP_ADMIN_TELEPORT, unused otherwise): done right away on the
  * host, sent to it by another admin.
  */
-void dopo_mp_admin(dopo_mp_admin_t action, int slot);
+void dopo_mp_admin(dopo_mp_admin_t action, int slot, int target);
 
 /**
  * @brief Deaths of a player since the netgame started, counted in the
@@ -241,6 +244,19 @@ void dopo_mp_tic_begin(int tic);
  * stamped for it (kills, level changes) and the deaths count.
  */
 void dopo_mp_session_tic(int tic);
+
+/* ------------------------------------------------------------------ */
+/* Actions inside a game tic (multiplayer/actions.c)                   */
+/* ------------------------------------------------------------------ */
+
+/** @brief Kills a player, god mode and invulnerability included. */
+void dopo_mp_kill(int slot);
+
+/**
+ * @brief Teleports a player next to another, facing them, on a free spot
+ * (no telefrag); nothing happens without one.
+ */
+void dopo_mp_teleport(int slot, int target);
 
 /* ------------------------------------------------------------------ */
 /* Lockstep (multiplayer/lockstep.c, in d_client.c)                    */

@@ -12,7 +12,6 @@
 #include "doomstat.h"
 #include "d_main.h"
 #include "g_game.h"
-#include "p_inter.h"
 #include "st_stuff.h"
 #include "lprintf.h"
 #include "dopo/cheats.h"
@@ -36,9 +35,11 @@ extern dbool quit_pressed;
 #define DOPO_ROSTER_SLOT (4 + DOPO_MP_NAME + 1)
 #define DOPO_ROSTER_SIZE (1 + MAXPLAYERS * DOPO_ROSTER_SLOT)
 
-/* KILL: type, tic, slot; LEVEL: type, tic, mode, skill, episode, map */
-#define DOPO_KILL_SIZE  6
-#define DOPO_LEVEL_SIZE 9
+/* KILL: type, tic, slot; TELEPORT: type, tic, slot, target;
+ * LEVEL: type, tic, mode, skill, episode, map */
+#define DOPO_KILL_SIZE     6
+#define DOPO_TELEPORT_SIZE 7
+#define DOPO_LEVEL_SIZE    9
 
 /* PINGS: type, then per slot the ping in ms (0xFFFF unknown) */
 #define DOPO_PINGS_SIZE (1 + MAXPLAYERS * 2)
@@ -60,8 +61,8 @@ static uint8_t dopo_start_packet[DOPO_START_SIZE];
 static dbool   dopo_end_pending;
 
 /**
- * @brief Events (KILL, LEVEL packets) waiting for their tic, in the order
- * they came.
+ * @brief Events (KILL, TELEPORT, LEVEL packets) waiting for their tic, in
+ * the order they came.
  */
 static struct
 {
@@ -235,14 +236,9 @@ static void dopo_host_event(uint8_t *p, size_t len)
 static void dopo_apply_event(const uint8_t *p)
 {
   if (p[0] == DOPO_MP_KILL)
-  {
-    const int slot = p[5];
-
-    /* 10000 goes through god mode, as a telefrag does */
-    if (slot < MAXPLAYERS && playeringame[slot] && players[slot].mo &&
-        players[slot].health > 0)
-      P_DamageMobj(players[slot].mo, NULL, NULL, 10000);
-  }
+    dopo_mp_kill(p[5]);
+  else if (p[0] == DOPO_MP_TELEPORT)
+    dopo_mp_teleport(p[5], p[6]);
   else if (p[0] == DOPO_MP_LEVEL)
   {
     deathmatch = p[5];
@@ -283,9 +279,9 @@ int dopo_mp_deaths(int slot)
 /**
  * @brief Host: does an admin action already allowed.
  */
-static void dopo_admin_do(int action, int slot)
+static void dopo_admin_do(int action, int slot, int target)
 {
-  uint8_t p[DOPO_KILL_SIZE];
+  uint8_t p[DOPO_TELEPORT_SIZE];
 
   if (slot < 0 || slot >= MAXPLAYERS || !dopo_slots[slot].used)
     return;
@@ -316,6 +312,17 @@ static void dopo_admin_do(int action, int slot)
         dopo_host_event(p, DOPO_KILL_SIZE);
       }
       break;
+
+    case DOPO_MP_ADMIN_TELEPORT:
+      if (dopo_state == DOPO_MP_GAME && target >= 0 && target < MAXPLAYERS &&
+          target != slot && dopo_slots[target].used)
+      {
+        p[0] = DOPO_MP_TELEPORT;
+        p[5] = (uint8_t)slot;
+        p[6] = (uint8_t)target;
+        dopo_host_event(p, DOPO_TELEPORT_SIZE);
+      }
+      break;
   }
 }
 
@@ -326,20 +333,21 @@ dbool dopo_mp_is_admin(void)
   return dopo_state == DOPO_MP_OFF || (self >= 0 && dopo_slots[self].admin);
 }
 
-void dopo_mp_admin(dopo_mp_admin_t action, int slot)
+void dopo_mp_admin(dopo_mp_admin_t action, int slot, int target)
 {
-  uint8_t p[3];
+  uint8_t p[4];
 
   if (dopo_state == DOPO_MP_OFF || !dopo_mp_is_admin())
     return;
   if (dopo_mp_is_host())
   {
-    dopo_admin_do(action, slot);
+    dopo_admin_do(action, slot, target);
     return;
   }
   p[0] = DOPO_MP_ADMIN;
   p[1] = (uint8_t)action;
   p[2] = (uint8_t)slot;
+  p[3] = (uint8_t)target;
   dopo_send(DOPO_MP_HOST, p, sizeof(p));
 }
 
@@ -752,9 +760,9 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
       break;
 
     case DOPO_MP_ADMIN:
-      if (host && len >= 3 && (i = dopo_slot_of(from)) >= 0 &&
+      if (host && len >= 4 && (i = dopo_slot_of(from)) >= 0 &&
           dopo_slots[i].admin)
-        dopo_admin_do(p[1], p[2]);
+        dopo_admin_do(p[1], p[2], p[3]);
       break;
 
     case DOPO_MP_KICK:
@@ -768,6 +776,11 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
     case DOPO_MP_KILL:
       if (!host && len >= DOPO_KILL_SIZE)
         dopo_queue_event(p, DOPO_KILL_SIZE);
+      break;
+
+    case DOPO_MP_TELEPORT:
+      if (!host && len >= DOPO_TELEPORT_SIZE)
+        dopo_queue_event(p, DOPO_TELEPORT_SIZE);
       break;
 
     case DOPO_MP_LEVEL:
