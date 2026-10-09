@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@GAME_TITLE@ - PrBoomTV</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body class="play">
+  <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+  <p id="status">Loading @GAME_TITLE@...</p>
+
+  <script type="module">
+    import { play, hashParams } from '../../retroarch/player.js';
+
+    const status = document.getElementById('status');
+
+    /* the sound starts with the first key or click: browsers hold audio
+     * back until the page is interacted with */
+    play({
+      canvas: document.getElementById('canvas'),
+      core: '../prboomtv_libretro.js',
+      content: '../roms/@GAME_ID@.wad',
+      nick: hashParams().get('nick') || '',
+      progress: (loaded, total) => {
+        if (total) status.textContent = `Loading @GAME_TITLE@... ${Math.round(loaded * 100 / total)}%`;
+      },
+    }).then(() => status.remove(), (e) => {
+      console.error(e);
+      status.classList.add('error');
+      status.textContent = `Could not start: ${e.message ?? e}`;
+    });
+  </script>
+</body>
+</html>

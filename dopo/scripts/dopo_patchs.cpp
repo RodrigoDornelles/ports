@@ -1,7 +1,7 @@
-// prboomtv_patchs: applies line based patches on top of the upstream prboom
-// sources, so a change does not need a full copy of the file it touches.
+// dopo_patchs: applies line based patches on top of upstream sources (prboom,
+// retroarch), so a change does not need a full copy of the file it touches.
 //
-// usage: prboomtv_patchs --source <upstream dir> --output <dir> <patch.c>...
+// usage: dopo_patchs --source <upstream dir> --output <dir> <patch.c>...
 //
 // A patch file holds one or more hunks, written in documentation notation:
 //
@@ -346,7 +346,7 @@ int run(std::span<char*> args)
             patches.emplace_back(current);
     }
     if (source.empty() || output.empty())
-        throw Error{"usage: prboomtv_patchs --source <upstream dir> --output <dir> <patch.c>..."};
+        throw Error{"usage: dopo_patchs --source <upstream dir> --output <dir> <patch.c>..."};
 
     // deterministic order no matter how the shell or cmake listed them
     std::ranges::sort(patches);

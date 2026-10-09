@@ -7,12 +7,26 @@
       "cacheVariables": {
         "TARGET": "arm-linux-gnueabihf"
       }
+    },
+    {
+      "name": "wasm",
+      "binaryDir": "${sourceDir}/build_wasm",
+      "cacheVariables": {
+        "PORTS_WASM": "ON",
+        "PORTS_USE_SDL_LIBRETRO": "OFF",
+        "PORTS_USE_PRBOOMTV_LIBRETRO": "ON",
+        "PORTS_USE_RETROARCH": "ON"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "arm",
       "configurePreset": "arm"
+    },
+    {
+      "name": "wasm",
+      "configurePreset": "wasm"
     }
   ]
 }
