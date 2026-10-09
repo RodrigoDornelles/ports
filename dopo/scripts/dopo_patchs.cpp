@@ -227,10 +227,11 @@ void validate(const std::string& target, const std::vector<Hunk>& hunks, std::si
                                     hunk.where(), hunk.span(), target, count)};
     }
 
-    auto replaces = hunks
-        | rv::filter([](const Hunk& h) { return !h.insertion(); })
-        | rv::transform([](const Hunk& h) { return &h; })
-        | std::ranges::to<std::vector>();
+    // collected by hand: std::ranges::to needs GCC 14, and CI has 13
+    std::vector<const Hunk*> replaces;
+    for (const auto& hunk : hunks)
+        if (!hunk.insertion())
+            replaces.push_back(&hunk);
     std::ranges::sort(replaces, {}, &Hunk::first);
 
     for (const auto& [prev, next] : replaces | rv::adjacent<2>) {
@@ -321,11 +322,11 @@ void remove_stale(const fs::path& output, const std::set<fs::path>& keep)
 {
     if (!fs::exists(output))
         return;
-    const auto stale = fs::recursive_directory_iterator{output}
-        | rv::filter([](const fs::directory_entry& e) { return e.is_regular_file(); })
-        | rv::transform([](const fs::directory_entry& e) { return e.path(); })
-        | rv::filter([&](const fs::path& p) { return !keep.contains(p); })
-        | std::ranges::to<std::vector>();
+    // removed after the walk, not during it
+    std::vector<fs::path> stale;
+    for (const auto& entry : fs::recursive_directory_iterator{output})
+        if (entry.is_regular_file() && !keep.contains(entry.path()))
+            stale.push_back(entry.path());
     for (const auto& path : stale)
         fs::remove(path);
 }
