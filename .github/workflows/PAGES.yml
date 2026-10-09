@@ -1,0 +1,38 @@
+name: pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  doxygen:
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        uses: actions/checkout@master
+      - 
+        run: |
+          cmake --preset wasm
+      - 
+        run: |
+          cmake --build --preset wasm -j$(nproc)
+      - 
+        uses: actions/configure-pages@v4
+      - 
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./build_wasm/dist
+      - 
+        id: deployment
+        uses: actions/deploy-pages@v4
