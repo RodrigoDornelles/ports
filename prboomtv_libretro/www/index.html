@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrBoomTV</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>PrBoom<span>TV</span></h1>
+    <p class="lead">Doom in the browser. Multiplayer is browser against browser: open Multiplayer in the game's menu to host a room or join one.</p>
+
+    <label for="nick">Nickname</label>
+    <input id="nick" type="text" maxlength="15" autocomplete="nickname" spellcheck="false" placeholder="Player">
+
+    <ul id="games" class="games"></ul>
+  </main>
+
+  <script type="module">
+    const nick = document.getElementById('nick');
+    const list = document.getElementById('games');
+
+    try { nick.value = localStorage.getItem('prboomtv.nick') ?? ''; } catch {}
+    nick.addEventListener('input', () => {
+      try { localStorage.setItem('prboomtv.nick', nick.value.trim()); } catch {}
+      for (const link of list.querySelectorAll('a.game')) link.href = target(link.dataset.game);
+    });
+
+    function target(id) {
+      const name = nick.value.trim();
+      return `${id}/` + (name ? `#nick=${encodeURIComponent(name)}` : '');
+    }
+
+    const games = await (await fetch('games.json')).json();
+    for (const game of games) {
+      const item = document.createElement('li');
+      const card = document.createElement('a');
+      card.className = 'game';
+      card.dataset.game = game.id;
+      card.href = target(game.id);
+      const title = document.createElement('strong');
+      title.textContent = game.title;
+      const note = document.createElement('small');
+      note.textContent = `${game.id}.wad`;
+      card.append(title, note);
+      item.append(card);
+      list.append(item);
+    }
+  </script>
+</body>
+</html>
