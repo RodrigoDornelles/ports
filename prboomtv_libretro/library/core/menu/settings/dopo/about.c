@@ -8,7 +8,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 #define DOPO_ABOUT_X 10
 

@@ -35,14 +35,14 @@
  * menus PrBoom brings (Game Options and its submenus, Load and Save,
  * episode and skill) keep their own layout.
  */
-#ifndef DOPO_MENU_H
-#define DOPO_MENU_H
+#ifndef PRBOOMTV_MENU_H
+#define PRBOOMTV_MENU_H
 
-#include "dopo/change_game.h"
-#include "dopo/change_weapon.h"
-#include "dopo/cheats.h"
-#include "dopo/multiplayer.h"
-#include "dopo/patchs.h"
+#include "prboomtv/change_game.h"
+#include "prboomtv/change_weapon.h"
+#include "prboomtv/cheats.h"
+#include "prboomtv/multiplayer.h"
+#include "prboomtv/patchs.h"
 
 /* ------------------------------------------------------------------ */
 /* Layout (menu/layout.c)                                              */

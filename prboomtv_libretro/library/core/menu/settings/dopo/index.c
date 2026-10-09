@@ -7,7 +7,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 static void dopo_dopo_options_draw(void);
 

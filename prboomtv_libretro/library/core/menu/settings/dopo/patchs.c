@@ -8,7 +8,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 static void dopo_toggle_action_button(int choice)
 {

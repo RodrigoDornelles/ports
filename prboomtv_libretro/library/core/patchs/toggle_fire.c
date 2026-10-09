@@ -22,7 +22,7 @@
  * @brief Whether Toggle Fire is on; toggled from Dopo Options > Patchs and
  * not saved.
  */
-#include "dopo/patchs.h"
+#include "prboomtv/patchs.h"
 
 dbool dopo_toggle_fire = TRUE;
 

@@ -10,7 +10,7 @@
 #include "r_main.h"
 #include "s_sound.h"
 #include "tables.h"
-#include "dopo/multiplayer.h"
+#include "prboomtv/multiplayer.h"
 
 /**
  * @brief Kills a player even in god mode or invulnerable: those are put

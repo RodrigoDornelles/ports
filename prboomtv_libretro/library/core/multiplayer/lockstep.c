@@ -14,7 +14,7 @@
  * @patch src/d_client.c 57
  */
 #include <limits.h>
-#include "dopo/multiplayer.h"
+#include "prboomtv/multiplayer.h"
 /* @endpatch */
 
 /**

@@ -12,8 +12,8 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
-#include "dopo/rooms.h"
+#include "prboomtv/menu.h"
+#include "prboomtv/rooms.h"
 
 static void dopo_lobby_draw(void);
 static void dopo_lobby_mode(int choice);

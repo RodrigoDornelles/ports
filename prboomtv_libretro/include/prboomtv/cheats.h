@@ -3,8 +3,8 @@
  * multiplayer/settings.c so a netgame changes them on every machine at
  * the same tic.
  */
-#ifndef DOPO_CHEATS_H
-#define DOPO_CHEATS_H
+#ifndef PRBOOMTV_CHEATS_H
+#define PRBOOMTV_CHEATS_H
 
 #include "doomtype.h"
 

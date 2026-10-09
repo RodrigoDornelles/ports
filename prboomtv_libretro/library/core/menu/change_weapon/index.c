@@ -11,7 +11,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 #define DOPO_WEAPON_HEXEN_SLOTS 4
 
@@ -222,6 +222,6 @@ void dopo_change_weapon_open(int choice)
  *
  * @patch src/g_game.c 311
  */
-#include "dopo/change_weapon.h"
+#include "prboomtv/change_weapon.h"
 
 /* @endpatch */

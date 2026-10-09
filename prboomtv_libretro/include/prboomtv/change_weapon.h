@@ -1,8 +1,8 @@
 /**
  * @brief Change Weapon (menu/change_weapon/index.c).
  */
-#ifndef DOPO_CHANGE_WEAPON_H
-#define DOPO_CHANGE_WEAPON_H
+#ifndef PRBOOMTV_CHANGE_WEAPON_H
+#define PRBOOMTV_CHANGE_WEAPON_H
 
 #include "doomdef.h"
 

@@ -10,8 +10,8 @@
  * version for the frontend, the netpacket protocol version, and what a
  * session's HELLO is checked against.
  */
-#ifndef DOPO_VERSION_H
-#define DOPO_VERSION_H
+#ifndef PRBOOMTV_VERSION_H
+#define PRBOOMTV_VERSION_H
 
 #define DOPO_VERSION_MINOR 1
 

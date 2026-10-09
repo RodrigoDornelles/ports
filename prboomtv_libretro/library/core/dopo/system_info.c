@@ -1,7 +1,7 @@
 /**
  * @brief The core's name and version for the frontend: PrBoomTV, so a
  * frontend tells it apart from the PrBoom core it forks (RetroArch netplay
- * refuses a different core name), and the version of include/dopo/version.h.
+ * refuses a different core name), and the version of include/prboomtv/version.h.
  */
 
 /**
@@ -9,7 +9,7 @@
  *
  * @patch libretro/libretro.c 1020
  */
-#include "dopo/version.h"
+#include "prboomtv/version.h"
 
 /* @endpatch */
 

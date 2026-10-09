@@ -12,7 +12,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 /* on the menus' anchor: names from DOPO_MENU_LEFT, K/D
  * and ping right aligned, ping on DOPO_MENU_RIGHT */

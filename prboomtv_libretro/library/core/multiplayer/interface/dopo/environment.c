@@ -8,7 +8,7 @@
  *
  * @patch libretro/libretro.c 908
  */
-#include "dopo/rooms.h"
+#include "prboomtv/rooms.h"
 
 dbool dopo_environment(unsigned cmd, void *data)
 {

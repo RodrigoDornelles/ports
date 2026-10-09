@@ -9,7 +9,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 /**
  * @brief Each routine edits a copy of the cheats asked for last and asks

@@ -6,7 +6,7 @@
  *   netgame:        Change Weapon, Scoreboard, Multiplayer, Settings, Exit
  *
  * Every game gets it, in its own big font, under the game's logo on the
- * anchor every Dopo menu shares (include/dopo/menu.h).
+ * anchor every Dopo menu shares (include/prboomtv/menu.h).
  */
 
 /**
@@ -17,7 +17,7 @@
  *
  * @patch src/m_menu.c 375-413
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 enum
 {

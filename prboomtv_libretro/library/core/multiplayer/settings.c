@@ -8,8 +8,8 @@
  * ticcmd, so every machine applies it right before the same tic.
  */
 #include "doomstat.h"
-#include "dopo/cheats.h"
-#include "dopo/multiplayer.h"
+#include "prboomtv/cheats.h"
+#include "prboomtv/multiplayer.h"
 
 dopo_cheats_t dopo_cheats;
 

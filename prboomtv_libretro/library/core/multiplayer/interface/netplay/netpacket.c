@@ -13,8 +13,8 @@
  *
  * @patch libretro/libretro.c 908
  */
-#include "dopo/multiplayer.h"
-#include "dopo/version.h"
+#include "prboomtv/multiplayer.h"
+#include "prboomtv/version.h"
 
 static retro_netpacket_send_t dopo_netpacket_send_fn;
 

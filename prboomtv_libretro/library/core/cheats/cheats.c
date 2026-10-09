@@ -6,7 +6,7 @@
  */
 #include "doomstat.h"
 #include "d_player.h"
-#include "dopo/cheats.h"
+#include "prboomtv/cheats.h"
 
 /**
  * @brief Gives every weapon the game has, with the same rules as IDFA

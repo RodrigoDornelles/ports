@@ -14,9 +14,9 @@
 #include "g_game.h"
 #include "st_stuff.h"
 #include "lprintf.h"
-#include "dopo/cheats.h"
-#include "dopo/multiplayer.h"
-#include "dopo/version.h"
+#include "prboomtv/cheats.h"
+#include "prboomtv/multiplayer.h"
+#include "prboomtv/version.h"
 
 void M_StartMessage(const char *string, void *routine, dbool input);
 void M_ClearMenus(void);

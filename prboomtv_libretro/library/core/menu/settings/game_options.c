@@ -20,7 +20,7 @@ void M_FinishReadThis(int choice)
  *
  * @patch src/m_menu.c 1417-1454
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 enum
 {

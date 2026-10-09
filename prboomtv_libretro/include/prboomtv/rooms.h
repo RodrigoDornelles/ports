@@ -1,7 +1,7 @@
 /**
  * @brief Rooms: hosting and joining netplay rooms from the core's own
  * menus (Multiplayer: Create Lobby, Game List), when the frontend speaks
- * the gecnd netplay calls (dopo/gecnd_netplay.h); RetroArch does not, so
+ * the dopo netplay calls (dopo/netplay.h); RetroArch does not, so
  * there the rooms stay in its Netplay menu.
  *
  * The room list is the libretro lobby's, read with jsmn: PrBoomTV rooms of
@@ -10,8 +10,8 @@
  * the games next to the running one (Change Game): the core switches to
  * that game first, then joins.
  */
-#ifndef DOPO_ROOMS_H
-#define DOPO_ROOMS_H
+#ifndef PRBOOMTV_ROOMS_H
+#define PRBOOMTV_ROOMS_H
 
 #include <stdint.h>
 #include "doomtype.h"
@@ -54,7 +54,7 @@ typedef struct
 
 /**
  * @brief The frontend's environment call (libretro.c, through
- * multiplayer/interface/gecnd/environment.c).
+ * multiplayer/interface/dopo/environment.c).
  */
 dbool dopo_environment(unsigned cmd, void *data);
 

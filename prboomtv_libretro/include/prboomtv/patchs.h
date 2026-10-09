@@ -2,8 +2,8 @@
  * @brief Patchs toggled from Dopo Options > Patchs, not saved
  * (library/core/patchs/).
  */
-#ifndef DOPO_PATCHS_H
-#define DOPO_PATCHS_H
+#ifndef PRBOOMTV_PATCHS_H
+#define PRBOOMTV_PATCHS_H
 
 #include "doomtype.h"
 

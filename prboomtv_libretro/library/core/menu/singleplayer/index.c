@@ -7,7 +7,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 static void dopo_singleplayer_draw(void);
 static void dopo_singleplayer_new(int choice);

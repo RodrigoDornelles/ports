@@ -354,7 +354,7 @@ endforeach()
 list(REMOVE_DUPLICATES prboomtv_patched_dirs)
 
 add_library(prboomtv_libretro SHARED "${prboomtv_files}")
-target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include")
+target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
     "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}

@@ -18,7 +18,7 @@
  *
  * @patch src/p_pspr.c 2519
  */
-#include "dopo/cheats.h"
+#include "prboomtv/cheats.h"
 
 static dbool  dopo_aim_assisted;
 static angle_t dopo_aim_angle;

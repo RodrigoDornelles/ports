@@ -1,7 +1,7 @@
 /**
  * @brief Menu layout shared by every Dopo menu, and the menu drawer.
  *
- * See include/dopo/menu.h for the small and big menu anchors.
+ * See include/prboomtv/menu.h for the small and big menu anchors.
  */
 
 /**
@@ -9,7 +9,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 /**
  * @brief x of the small menu column: the widest item the main menu can

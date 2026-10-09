@@ -16,7 +16,7 @@
  *
  * @patch src/p_inter.c 2303
  */
-#include "dopo/cheats.h"
+#include "prboomtv/cheats.h"
 
 static void dopo_upstream_damage_mobj(mobj_t *target, mobj_t *inflictor,
                                       mobj_t *source, int damage);

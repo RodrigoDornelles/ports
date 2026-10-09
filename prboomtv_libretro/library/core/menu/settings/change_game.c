@@ -11,7 +11,7 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
+#include "prboomtv/menu.h"
 
 #define DOPO_GAMES_PAGE  8
 #define DOPO_GAME_LABEL  17

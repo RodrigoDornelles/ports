@@ -1,6 +1,6 @@
 /**
  * @brief Multiplayer outside a session, when the frontend hosts and joins
- * rooms for the core (dopo/rooms.h): Create Lobby and Game List.
+ * rooms for the core (prboomtv/rooms.h): Create Lobby and Game List.
  *
  * Game List is a server list: a full screen table, in the small font, of
  * the lobby's PrBoomTV rooms (name, game, server, players), scrolling with the
@@ -13,8 +13,8 @@
  *
  * @patch src/m_menu.c 5589
  */
-#include "dopo/menu.h"
-#include "dopo/rooms.h"
+#include "prboomtv/menu.h"
+#include "prboomtv/rooms.h"
 
 
 /* ------------------------------------------------------------------ */

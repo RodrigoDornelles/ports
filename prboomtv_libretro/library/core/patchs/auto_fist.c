@@ -25,7 +25,7 @@
  * @brief Whether Auto Fist is on; toggled from Dopo Options > Patchs and
  * not saved.
  */
-#include "dopo/patchs.h"
+#include "prboomtv/patchs.h"
 
 dbool dopo_auto_fist = TRUE;
 

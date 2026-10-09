@@ -2,8 +2,8 @@
  * @brief Change Game: the games next to the running content and the
  * switch to one of them (dopo/change_game.c).
  */
-#ifndef DOPO_CHANGE_GAME_H
-#define DOPO_CHANGE_GAME_H
+#ifndef PRBOOMTV_CHANGE_GAME_H
+#define PRBOOMTV_CHANGE_GAME_H
 
 #include "doomtype.h"
 

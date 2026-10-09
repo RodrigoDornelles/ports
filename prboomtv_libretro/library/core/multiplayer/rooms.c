@@ -1,17 +1,17 @@
 /**
- * @brief Rooms (dopo/rooms.h): the lobby's room list read with jsmn, and
- * the requests that host, join and leave a room, all through the gecnd
- * netplay calls (dopo/gecnd_netplay.h).
+ * @brief Rooms (prboomtv/rooms.h): the lobby's room list read with jsmn, and
+ * the requests that host, join and leave a room, all through the dopo
+ * netplay calls (dopo/netplay.h).
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include "lprintf.h"
-#include "dopo/change_game.h"
-#include "dopo/gecnd_netplay.h"
-#include "dopo/rooms.h"
-#include "dopo/version.h"
+#include "prboomtv/change_game.h"
+#include "dopo/netplay.h"
+#include "prboomtv/rooms.h"
+#include "prboomtv/version.h"
 
 #define JSMN_STATIC
 #include "jsmn.h"
@@ -269,26 +269,26 @@ static void dopo_rooms_parse(const char *js, size_t size)
 
 dbool dopo_rooms_available(void)
 {
-  return dopo_environment(GECND_ENVIRONMENT_NETPLAY_GET_LOBBY, NULL);
+  return dopo_environment(DOPO_ENVIRONMENT_NETPLAY_GET_LOBBY, NULL);
 }
 
 static void dopo_rooms_ask(bool refresh)
 {
-  struct gecnd_netplay_lobby lobby = {0};
+  struct dopo_netplay_lobby lobby = {0};
 
   lobby.refresh = refresh;
-  if (!dopo_environment(GECND_ENVIRONMENT_NETPLAY_GET_LOBBY, &lobby))
+  if (!dopo_environment(DOPO_ENVIRONMENT_NETPLAY_GET_LOBBY, &lobby))
   {
     dopo_rooms_status = DOPO_ROOMS_FAILED;
     return;
   }
   switch (lobby.state)
   {
-    case GECND_NETPLAY_LOBBY_LOADING:
+    case DOPO_NETPLAY_LOBBY_LOADING:
       dopo_rooms_status = DOPO_ROOMS_LOADING;
       dopo_rooms_read = FALSE;
       break;
-    case GECND_NETPLAY_LOBBY_READY:
+    case DOPO_NETPLAY_LOBBY_READY:
       if (!dopo_rooms_read && lobby.json)
       {
         dopo_rooms_read = TRUE;
@@ -296,7 +296,7 @@ static void dopo_rooms_ask(bool refresh)
       }
       dopo_rooms_status = DOPO_ROOMS_READY;
       break;
-    case GECND_NETPLAY_LOBBY_FAILED:
+    case DOPO_NETPLAY_LOBBY_FAILED:
       dopo_rooms_status = DOPO_ROOMS_FAILED;
       break;
     default:
@@ -335,7 +335,7 @@ const dopo_room_t *dopo_rooms_get(int i)
 
 void dopo_rooms_create(dbool listed, const char *relay)
 {
-  struct gecnd_netplay_room room = {0};
+  struct dopo_netplay_room room = {0};
   char game[64];
   char *dot;
 
@@ -347,20 +347,20 @@ void dopo_rooms_create(dbool listed, const char *relay)
   room.listed = listed ? true : false;
   room.relay = relay;
   dopo_join_pending = FALSE;
-  dopo_environment(GECND_ENVIRONMENT_NETPLAY_POST_LOBBY, &room);
+  dopo_environment(DOPO_ENVIRONMENT_NETPLAY_POST_LOBBY, &room);
 }
 
 /** @brief Asks the frontend to join a room. */
 static void dopo_rooms_connect(const dopo_room_t *room)
 {
-  struct gecnd_netplay_join join = {0};
+  struct dopo_netplay_join join = {0};
 
   join.host = room->host;
   join.port = room->port;
   join.mitm_session = room->session;
   lprintf(LO_INFO, "dopo_rooms: joining %s (%s) at %s:%u%s%s\n", room->nick, room->game,
           room->host, room->port, room->session[0] ? " session " : "", room->session);
-  dopo_environment(GECND_ENVIRONMENT_NETPLAY_CONNECT, &join);
+  dopo_environment(DOPO_ENVIRONMENT_NETPLAY_CONNECT, &join);
 }
 
 dbool dopo_rooms_join(int i)
@@ -390,7 +390,7 @@ dbool dopo_rooms_join(int i)
 void dopo_rooms_leave(void)
 {
   dopo_join_pending = FALSE;
-  dopo_environment(GECND_ENVIRONMENT_NETPLAY_DISCONNECT, NULL);
+  dopo_environment(DOPO_ENVIRONMENT_NETPLAY_DISCONNECT, NULL);
 }
 
 void dopo_rooms_frame(void)
