@@ -100,7 +100,10 @@ int base_width_43 = 320;
       if (dopo_gl)
          dopo_gl_present(video_cb, frame, width, SCREENHEIGHT, pitch);
       else
+      {
+         dopo_gl_software_frame();
          video_cb(frame, width, SCREENHEIGHT, pitch);
+      }
    }
 /* @endpatch */
 

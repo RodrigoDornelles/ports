@@ -5,7 +5,7 @@
  *
  * GLES 2 only (a desktop GL 2 compatibility context runs the same shaders
  * when the frontend has no GLES). So far the GPU paints the wall and sky
- * columns; everything else is still drawn by the CPU into the software
+ * columns and the floor and ceiling spans; everything else is still drawn by the CPU into the software
  * frame, which is uploaded every frame and laid over the GPU columns. The
  * view starts each frame filled with a key colour, which only what the CPU
  * draws after the walls (flats, sprites, masked textures, HUD) covers, so
@@ -81,6 +81,23 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex);
 
 /** @brief Ends the replay started by dopo_gl_walls_begin. */
 void dopo_gl_walls_end(void);
+
+/**
+ * @brief Flat lump + 1 of the floor or ceiling spans being emitted, 0 when
+ * the GPU cannot reproduce them (a texture on a flat, a slope, dynamic
+ * lights). Set by R_DoDrawPlane before it makes the spans.
+ */
+extern int R_SpanTexture;
+
+/**
+ * @brief One floor or ceiling span of the view being replayed, queued for
+ * the GPU. False when it stays in software (brightmap, translucent 3D
+ * floor, another view, or R_SpanTexture 0).
+ */
+dbool dopo_gl_span(const draw_span_vars_t *ds, int lump);
+
+/** @brief Software renderer: logs fps and frame time like gl does. */
+void dopo_gl_software_frame(void);
 
 /**
  * @brief Presents the frame: the queued GPU columns, then the software

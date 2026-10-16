@@ -52,6 +52,7 @@ extern int firstcolormaplump;
 
 dbool dopo_gl = FALSE;
 int R_DrawCmdTexture = 0;
+int R_SpanTexture = 0;
 
 const struct retro_core_option_v2_definition dopo_gl_option =
 {
@@ -188,38 +189,48 @@ uint16_t dopo_gl_keys[GL_KEYS] = { 0, 0 };
 /* 16-bit indices: at most 16383 quads per draw call */
 #define GL_MAX_QUADS_PER_DRAW 16383
 
-/* one quad corner: 12 bytes, the upload is slow on the Mali-400 */
+/* one quad corner, 16 bytes (the upload is slow on the Mali-400): a wall
+ * column runs s down the column at a fixed t, a flat span runs both
+ * across the row, past the texture's edges (GL_REPEAT) */
 typedef struct
 {
    int16_t  x, y;   /* frame pixels */
-   float    s;      /* texel row along the column, over the texture's GL width */
-   uint16_t t;      /* texture column (normalized) */
+   float    s, t;   /* texture coordinates */
    uint16_t l;      /* colour table row (normalized) */
+   uint16_t pad;
 } glvert_t;
 
+/* a wall texture (composite, columns along GL rows) or a flat (64x64,
+ * as stored) */
 typedef struct
 {
    GLuint         id;
-   int            gl_width, gl_height;  /* powers of two: rows, columns */
+   int            gl_width, gl_height;  /* powers of two */
    unsigned       stamp;                /* replay the patch below is from */
    const rpatch_t *patch;
    dbool          bad;                  /* too big for the GPU */
    int            count, first;         /* quads this frame, while sorting */
 } gltex_t;
 
-static gltex_t        *texcache = NULL;
+static gltex_t        *texcache = NULL;   /* per texture number */
 static int             texcache_n = 0;
 static texture_t     **texcache_owner = NULL;
+static gltex_t        *flatcache = NULL;  /* per lump number */
+static int             flatcache_n = 0;
+static lumpinfo_t     *flatcache_owner = NULL;
 static unsigned        replay_stamp = 0;
 
 /* quads of the frame, in emission order, and the texture of each */
 static glvert_t       *quads = NULL;
-static int            *quad_tex = NULL;
+static gltex_t       **quad_tex = NULL;
 static int             quad_n = 0, quad_cap = 0;
 static glvert_t       *sorted = NULL;
 static int             sorted_cap = 0;
-static int            *used = NULL;      /* textures with quads this frame */
+static gltex_t       **used = NULL;      /* textures with quads this frame */
 static int             used_n = 0;
+
+/* a view of the frame is being replayed on the GPU (walls, then flats) */
+static dbool           view_active = FALSE;
 
 /* the replay in progress: where the view sits in the frame */
 static int             view_x0, view_y0;
@@ -252,6 +263,7 @@ static size_t          frame_copy_size = 0;
 static double          stat_walls_ms, stat_setup_ms, stat_fill_ms, stat_present_ms;
 static double          stat_frame_ms, stat_last_present;
 static long            stat_quads, stat_columns, stat_software, stat_draws;
+static long            stat_spans, stat_spans_software;
 static int             stat_frames;
 
 static double gl_now_ms(void)
@@ -330,16 +342,16 @@ static dbool gl_load_functions(void)
 static const char *wall_vs =
    "#version 100\n"
    "attribute vec2 a_pos;\n"
-   "attribute float a_s;\n"
-   "attribute vec2 a_tl;\n"
+   "attribute vec2 a_st;\n"
+   "attribute float a_l;\n"
    "uniform vec2 u_scale;\n"
    "uniform vec2 u_offset;\n"
    "varying vec2 v_uv;\n"
    "varying float v_light;\n"
    "void main() {\n"
    "  vec2 p = (a_pos + u_offset) * u_scale;\n"
-   "  v_uv = vec2(a_s, a_tl.x);\n"
-   "  v_light = a_tl.y;\n"
+   "  v_uv = a_st;\n"
+   "  v_light = a_l;\n"
    "  gl_Position = vec4(p.x - 1.0, 1.0 - p.y, 0.0, 1.0);\n"
    "}\n";
 
@@ -446,6 +458,8 @@ static void gl_forget_objects(void)
    int i;
    for (i = 0; i < texcache_n; i++)
       texcache[i].id = 0;
+   for (i = 0; i < flatcache_n; i++)
+      flatcache[i].id = 0;
    cmap_tex = 0;
    cmap_palette = NULL;
    wall_program = frame_program = 0;
@@ -455,7 +469,7 @@ static void gl_forget_objects(void)
 
 static void gl_context_reset(void)
 {
-   static const char *const wall_attribs[] = { "a_pos", "a_s", "a_tl" };
+   static const char *const wall_attribs[] = { "a_pos", "a_st", "a_l" };
    static const char *const frame_attribs[] = { "a_pos" };
    static const float corners[] = { 0, 0, 1, 0, 0, 1, 1, 1 };
    uint16_t *idx;
@@ -522,6 +536,9 @@ static void gl_context_destroy(void)
       for (i = 0; i < texcache_n; i++)
          if (texcache[i].id)
             glDeleteTextures(1, &texcache[i].id);
+      for (i = 0; i < flatcache_n; i++)
+         if (flatcache[i].id)
+            glDeleteTextures(1, &flatcache[i].id);
       glDeleteTextures(1, &cmap_tex);
       glDeleteTextures(2, frame_tex);
       glDeleteBuffers(1, &vbo);
@@ -541,7 +558,10 @@ dbool dopo_gl_load(retro_environment_t environ_cb)
    dopo_gl = FALSE;
    if (!environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value
          || strcmp(var.value, "gl"))
+   {
+      lprintf(LO_INFO, "prboom-render software\n");
       return TRUE;
+   }
 
    memset(&hw, 0, sizeof(hw));
    hw.context_reset      = gl_context_reset;
@@ -573,20 +593,59 @@ dbool dopo_gl_load(retro_environment_t environ_cb)
 
 /* ---- textures ---- */
 
-/* a new set of wads numbers the textures anew */
-static void gl_texcache_check(void)
+static void gl_cache_reset(gltex_t **cache, int *n, int size)
 {
    int i;
-   if (texcache_owner == textures && texcache_n == numtextures)
-      return;
-   for (i = 0; i < texcache_n; i++)
-      if (texcache[i].id && gl_ready)
-         glDeleteTextures(1, &texcache[i].id);
-   free(texcache);
-   texcache = (gltex_t *)calloc(numtextures > 0 ? numtextures : 1, sizeof(*texcache));
-   texcache_n = texcache ? numtextures : 0;
-   texcache_owner = textures;
+   for (i = 0; i < *n; i++)
+      if ((*cache)[i].id && gl_ready)
+         glDeleteTextures(1, &(*cache)[i].id);
+   free(*cache);
+   *cache = (gltex_t *)calloc(size > 0 ? size : 1, sizeof(**cache));
+   *n = *cache ? size : 0;
    quad_n = 0;
+}
+
+/* a new set of wads numbers the textures and the lumps anew */
+static void gl_texcache_check(void)
+{
+   if (texcache_owner != textures || texcache_n != numtextures)
+   {
+      gl_cache_reset(&texcache, &texcache_n, numtextures);
+      texcache_owner = textures;
+   }
+   if (flatcache_owner != lumpinfo || flatcache_n != numlumps)
+   {
+      gl_cache_reset(&flatcache, &flatcache_n, numlumps);
+      flatcache_owner = lumpinfo;
+   }
+}
+
+/* a flat lump as it is: 64x64, row major, u along s and v along t */
+static gltex_t *gl_flat(int lump)
+{
+   gltex_t *t;
+   const uint8_t *data;
+   uint8_t buf[64 * 64];
+   int len;
+
+   if (lump < 0 || lump >= flatcache_n)
+      return NULL;
+   t = &flatcache[lump];
+   if (t->id || t->bad)
+      return t->bad ? NULL : t;
+   len = W_LumpLength(lump);
+   data = (const uint8_t *)W_CacheLumpNum(lump);
+   memset(buf, 0, sizeof(buf));
+   memcpy(buf, data, len < (int)sizeof(buf) ? (size_t)len : sizeof(buf));
+   W_UnlockLumpNum(lump);
+   glGenTextures(1, &t->id);
+   glBindTexture(GL_TEXTURE_2D, t->id);
+   gl_texture_params(GL_REPEAT);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 64, 64, 0,
+                GL_LUMINANCE, GL_UNSIGNED_BYTE, buf);
+   t->gl_width = t->gl_height = 64;
+   return t;
 }
 
 /* the composite, column major: column x is GL row x, its texels along s */
@@ -785,14 +844,16 @@ dbool dopo_gl_walls_begin(void)
    view_x0 = (int)(off % SCREENWIDTH);
    view_y0 = (int)(off / SCREENWIDTH);
    replay_stamp++;
+   view_active = TRUE;
 
    /* The key over the whole view, row by row, before anything else is
-    * drawn on it: the walls and the sky are the first thing replayed, and
-    * the flats, sprites and the columns left to software cover it after,
-    * so the key stays exactly where the GPU paints (and where nothing
-    * does, the GPU's black shows instead of a stale frame). Filling it
-    * column by column instead touched a new cache line per pixel: 15 ms
-    * a frame at 1080p on the ARM. */
+    * drawn on it: the walls and the sky are the first thing replayed, then
+    * the flats; what the CPU still draws (sprites, masked textures, what
+    * the GPU cannot reproduce) covers it after, so the key stays exactly
+    * where the GPU paints (and where nothing does, the GPU's black shows
+    * instead of a stale frame). Filling it column by column instead
+    * touched a new cache line per pixel: 15 ms a frame at 1080p on the
+    * ARM. */
    {
       const uint16_t key = dopo_gl_keys[0];
       int y, x;
@@ -819,32 +880,32 @@ void dopo_gl_walls_end(void)
    stat_walls_ms += gl_now_ms();
 }
 
-static glvert_t *gl_quad(int texnum)
+static glvert_t *gl_quad(gltex_t *tex)
 {
    if (quad_n == quad_cap)
    {
       const int cap = quad_cap ? quad_cap * 2 : 8192;
       glvert_t *q = (glvert_t *)realloc(quads, sizeof(glvert_t) * 4 * cap);
-      int *t;
+      gltex_t **t;
       if (!q)
          return NULL;
       quads = q;
-      t = (int *)realloc(quad_tex, sizeof(int) * cap);
+      t = (gltex_t **)realloc(quad_tex, sizeof(*quad_tex) * cap);
       if (!t)
          return NULL;
       quad_tex = t;
       quad_cap = cap;
    }
-   quad_tex[quad_n] = texnum;
+   quad_tex[quad_n] = tex;
    return &quads[4 * quad_n++];
 }
 
 /* rows y0..y1-1 of column x, the texel row running from v0 at the top
  * edge to v1 at the bottom edge */
-static dbool gl_column(int texnum, const gltex_t *t, int x, int y0, int y1,
-                       double v0, double v1, uint16_t tc, uint16_t lc)
+static dbool gl_column(gltex_t *t, int x, int y0, int y1,
+                       double v0, double v1, float tc, uint16_t lc)
 {
-   glvert_t *q = gl_quad(texnum);
+   glvert_t *q = gl_quad(t);
    const float s0 = (float)(v0 / t->gl_width), s1 = (float)(v1 / t->gl_width);
    const int16_t xa = (int16_t)(view_x0 + x), xb = (int16_t)(view_x0 + x + 1);
    const int16_t ya = (int16_t)(view_y0 + y0), yb = (int16_t)(view_y0 + y1);
@@ -877,7 +938,8 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
    gltex_t *t;
    ptrdiff_t off;
    int col, row;
-   uint16_t tc, lc;
+   float tc;
+   uint16_t lc;
    int64_t f0, period, step;
 
    /* empty, the drawers skip it too */
@@ -910,7 +972,7 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
       stat_software++;
       return FALSE;
    }
-   tc = (uint16_t)(((col + 0.5) / t->gl_height) * 65535.0 + 0.5);
+   tc = (float)((col + 0.5) / t->gl_height);
    lc = (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
 
    if (dc->texheight && !(dc->texheight & (dc->texheight - 1)))
@@ -926,7 +988,7 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
       step = (uint32_t)dc->iscale & mask;
       f0 = ((uint32_t)dc->texturemid
             + (uint32_t)(dc->yl - centery) * (uint32_t)dc->iscale) & mask;
-      if (!gl_column(gltex - 1, t, dc->x, dc->yl, dc->yh + 1,
+      if (!gl_column(t, dc->x, dc->yl, dc->yh + 1,
                      (f0 - step * 0.5) / 65536.0,
                      (f0 + (dc->yh - dc->yl) * step + step * 0.5) / 65536.0, tc, lc))
       {
@@ -945,7 +1007,7 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
       /* no wrap (a texture that fits the wall): one quad */
       step = dc->iscale;
       f0 = (int64_t)dc->texturemid + (int64_t)(dc->yl - centery) * step;
-      if (!gl_column(gltex - 1, t, dc->x, dc->yl, dc->yh + 1,
+      if (!gl_column(t, dc->x, dc->yl, dc->yh + 1,
                      (f0 - step * 0.5) / 65536.0,
                      (f0 + (dc->yh - dc->yl) * step + step * 0.5) / 65536.0, tc, lc))
       {
@@ -969,7 +1031,7 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
          int64_t yb = ya + ((k + 1) * period - fa + step - 1) / step;
          if (yb > dc->yh + 1)
             yb = dc->yh + 1;
-         if (!gl_column(gltex - 1, t, dc->x, ya, (int)yb,
+         if (!gl_column(t, dc->x, ya, (int)yb,
                         (fa - k * period - step * 0.5) / 65536.0,
                         (fa + (yb - 1 - ya) * step - k * period + step * 0.5) / 65536.0,
                         tc, lc))
@@ -983,6 +1045,57 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
    return TRUE;
 }
 
+/* ---- flats ---- */
+
+/* Pixel x of a span samples (xfrac, yfrac) + (x - x1) * (xstep, ystep)
+ * (16.16), texel u = xfrac >> 16 & 63, v = yfrac >> 16 & 63: linear
+ * along the row, so a one pixel tall quad whose edges carry the
+ * coordinates half a step outside the first and last pixels. Both are
+ * taken modulo 64 in 32 bits like the drawer, which keeps them small. */
+dbool dopo_gl_span(const draw_span_vars_t *ds, int lump)
+{
+   gltex_t *t;
+   glvert_t *q;
+   int row, n;
+   uint16_t lc;
+   double u0, v0, du, dv;
+   int16_t xa, xb, ya, yb;
+
+   if (!view_active || drawvars.short_topleft != view_topleft)
+      return FALSE;
+   if (ds->x1 > ds->x2)
+      return TRUE;
+   stat_spans++;
+   if (!lump || ds->brightmask || r_span_translucent
+         || (t = gl_flat(lump - 1)) == NULL
+         || (row = gl_colormap_row(ds->colormap)) < 0
+         || (q = gl_quad(t)) == NULL)
+   {
+      stat_spans_software++;
+      return FALSE;
+   }
+   lc = (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
+   n  = ds->x2 - ds->x1 + 1;
+   u0 = (double)((uint32_t)ds->xfrac & 0x3fffff);
+   v0 = (double)((uint32_t)ds->yfrac & 0x3fffff);
+   du = ds->xstep;
+   dv = ds->ystep;
+   xa = (int16_t)(view_x0 + ds->x1);
+   xb = (int16_t)(view_x0 + ds->x2 + 1);
+   ya = (int16_t)(view_y0 + ds->y);
+   yb = (int16_t)(view_y0 + ds->y + 1);
+   q[0].x = xa; q[0].y = ya;
+   q[1].x = xb; q[1].y = ya;
+   q[2].x = xb; q[2].y = yb;
+   q[3].x = xa; q[3].y = yb;
+   q[0].s = q[3].s = (float)((u0 - du * 0.5) / (65536.0 * 64));
+   q[1].s = q[2].s = (float)((u0 + du * (n - 0.5)) / (65536.0 * 64));
+   q[0].t = q[3].t = (float)((v0 - dv * 0.5) / (65536.0 * 64));
+   q[1].t = q[2].t = (float)((v0 + dv * (n - 0.5)) / (65536.0 * 64));
+   q[0].l = q[1].l = q[2].l = q[3].l = lc;
+   return TRUE;
+}
+
 /* ---- presenting ---- */
 
 /* quads grouped per texture, in the order the textures first showed up */
@@ -993,7 +1106,7 @@ static int gl_sort_quads(void)
    if (sorted_cap < quad_n)
    {
       glvert_t *s = (glvert_t *)realloc(sorted, sizeof(glvert_t) * 4 * quad_cap);
-      int *u = (int *)realloc(used, sizeof(int) * quad_cap);
+      gltex_t **u = (gltex_t **)realloc(used, sizeof(*used) * quad_cap);
       if (!s || !u)
       {
          if (s) sorted = s;
@@ -1007,15 +1120,15 @@ static int gl_sort_quads(void)
    used_n = 0;
    for (i = 0; i < quad_n; i++)
    {
-      gltex_t *t = &texcache[quad_tex[i]];
+      gltex_t *t = quad_tex[i];
       if (!t->count++)
-         used[used_n++] = quad_tex[i];
+         used[used_n++] = t;
    }
    {
       int first = 0;
       for (i = 0; i < used_n; i++)
       {
-         gltex_t *t = &texcache[used[i]];
+         gltex_t *t = used[i];
          t->first = first;
          first += t->count;
          t->count = 0;
@@ -1023,7 +1136,7 @@ static int gl_sort_quads(void)
    }
    for (i = 0; i < quad_n; i++)
    {
-      gltex_t *t = &texcache[quad_tex[i]];
+      gltex_t *t = quad_tex[i];
       memcpy(&sorted[4 * (t->first + t->count++)], &quads[4 * i], sizeof(glvert_t) * 4);
    }
    return 1;
@@ -1054,7 +1167,7 @@ static void gl_draw_walls(unsigned width, unsigned height, int offset_x)
 
    for (i = 0; i < used_n; i++)
    {
-      gltex_t *t = &texcache[used[i]];
+      gltex_t *t = used[i];
       int first = t->first, count = t->count;
       glBindTexture(GL_TEXTURE_2D, t->id);
       while (count > 0)
@@ -1062,8 +1175,8 @@ static void gl_draw_walls(unsigned width, unsigned height, int offset_x)
          const int chunk = count < GL_MAX_QUADS_PER_DRAW ? count : GL_MAX_QUADS_PER_DRAW;
          const char *base = (const char *)(intptr_t)(first * 4 * sizeof(glvert_t));
          glVertexAttribPointer(0, 2, GL_SHORT, 0, sizeof(glvert_t), base);
-         glVertexAttribPointer(1, 1, GL_FLOAT, 0, sizeof(glvert_t), base + 4);
-         glVertexAttribPointer(2, 2, GL_UNSIGNED_SHORT, 1, sizeof(glvert_t), base + 8);
+         glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(glvert_t), base + 4);
+         glVertexAttribPointer(2, 1, GL_UNSIGNED_SHORT, 1, sizeof(glvert_t), base + 12);
          glDrawElements(GL_TRIANGLES, chunk * 6, GL_UNSIGNED_SHORT, 0);
          stat_draws++;
          first += chunk;
@@ -1151,17 +1264,39 @@ static void gl_stats(void)
     * the columns themselves; present = frame upload and draws (CPU side) */
    lprintf(LO_INFO, "prboom-render gl: %.1f fps, frame %.2f ms | walls %.2f ms "
            "(setup %.2f, key %.2f, columns %.2f) | present %.2f ms | "
-           "%ld quads, %ld draws, %ld columns in software\n",
+           "%ld quads, %ld draws | software: %ld of %ld columns, %ld of %ld spans\n",
            stat_frame_ms > 0 ? 1000.0 * stat_frames / stat_frame_ms : 0.0,
            stat_frame_ms / stat_frames, stat_walls_ms / stat_frames,
            stat_setup_ms / stat_frames, stat_fill_ms / stat_frames,
            (stat_walls_ms - stat_setup_ms - stat_fill_ms) / stat_frames,
            stat_present_ms / stat_frames, stat_quads / stat_frames,
-           stat_draws / stat_frames, stat_software / stat_frames);
+           stat_draws / stat_frames, stat_software / stat_frames,
+           stat_columns / stat_frames, stat_spans_software / stat_frames,
+           stat_spans / stat_frames);
    stat_walls_ms = stat_setup_ms = stat_fill_ms = stat_present_ms = 0;
    stat_frame_ms = 0;
    stat_quads = stat_columns = stat_software = stat_draws = 0;
+   stat_spans = stat_spans_software = 0;
    stat_frames = 0;
+}
+
+/* the software renderer's line, to compare with gl's: the whole frame,
+ * from one present to the next */
+void dopo_gl_software_frame(void)
+{
+   static double last, sum;
+   static int frames;
+   const double now = gl_now_ms();
+
+   if (last > 0)
+      sum += now - last;
+   last = now;
+   if (++frames < GL_STATS_FRAMES)
+      return;
+   lprintf(LO_INFO, "prboom-render software: %.1f fps, frame %.2f ms\n",
+           sum > 0 ? 1000.0 * frames / sum : 0.0, sum / frames);
+   sum = 0;
+   frames = 0;
 }
 
 void dopo_gl_present(retro_video_refresh_t video_cb, const void *frame,
@@ -1188,6 +1323,7 @@ void dopo_gl_present(retro_video_refresh_t video_cb, const void *frame,
    glClearColor(0, 0, 0, 1);
    glClear(GL_COLOR_BUFFER_BIT);
 
+   view_active = FALSE;
    gl_draw_walls(width, height, ((int)width - SCREENWIDTH) / 2);
    quad_n = 0;
    gl_draw_frame(frame, width, height, pitch);

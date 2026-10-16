@@ -1,5 +1,6 @@
 /**
- * @brief prboom-render = gl: the wall and sky records go to the GPU
+ * @brief prboom-render = gl: the wall and sky records and the floor and
+ * ceiling spans go to the GPU
  * (render/gl.c). Each record carries the texture its column comes from,
  * which the emitters announce in R_DrawCmdTexture; the replay hands every
  * record to dopo_gl_wall and draws in software only what the GPU cannot
@@ -95,4 +96,24 @@
 #include "prboomtv/render_gl.h"
 #undef GETBLENDED16_9406
 #define GETBLENDED16_9406(col1, col2) dopo_gl_fuzz16(col1, col2)
+/* @endpatch */
+
+/**
+ * @brief Every floor and ceiling span is offered to the GPU first.
+ *
+ * @patch src/r_plane.c 329
+ */
+  if (dopo_gl_span(dv, R_SpanTexture))
+    return;
+/* @endpatch */
+
+/**
+ * @brief A plain flat goes to the GPU; a texture on a flat, a slope or a
+ * plane under dynamic lights (tinted on the CPU) stays in software.
+ *
+ * @patch src/r_plane.c 1413
+ */
+         R_SpanTexture = (R_IsSyntheticFlat(pl->picnum) || tilt_plane
+                          || plane_dynlit || plane_wallglow)
+                       ? 0 : firstflat + flattranslation[pl->picnum] + 1;
 /* @endpatch */

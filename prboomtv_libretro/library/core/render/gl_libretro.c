@@ -27,3 +27,12 @@
    if (!dopo_gl_load(environ_cb))
       return false;
 /* @endpatch */
+
+/**
+ * @brief The software frame drawn straight into the frontend's buffer is
+ * counted too (render/gl.c), to compare with gl.
+ *
+ * @patch libretro/libretro.c 3919
+ */
+      dopo_gl_software_frame();
+/* @endpatch */
