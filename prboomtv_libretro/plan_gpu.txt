@@ -1,0 +1,154 @@
+PrBoomTV - plano do renderizador GPU (CPU decide, GPU pinta)
+===========================================================
+
+Objetivo
+--------
+Rodar o PrBoomTV em 1080p (e 720p a 60fps) numa TV box ARMv7 com
+Mali-400 (GLES 2.0), mantendo o visual do renderizador software.
+
+Ideia: o renderizador software continua decidindo TUDO (BSP, recorte,
+visplanes, parametros de cada coluna e de cada faixa, luz, colormap).
+Em vez de preencher os pixels na CPU, ele entrega a lista de "pinte esta
+coluna/faixa desta textura com esta luz" e a GPU pinta. A GPU nao decide
+visibilidade (nao precisa de depth buffer): so reproduz os parametros.
+
+Medicoes que justificam
+-----------------------
+Aparelho: ARMv7 ~14k DMIPS, Mali-400 MP, GLES 2.0, GLSL ES 1.00,
+GL_MAX_TEXTURE_SIZE 4096, fragment highp NAO suportado, mediump 10 bits.
+
+Core sozinho (harness, sem frontend):
+- 1280x720 + threads Auto: 60.6 fps (16.5 ms)
+- 1920x1080 sem threads:   23.7 fps (42 ms)
+No frontend em 1080p: ~12 fps -> ~40 ms por quadro sao do frontend
+(upload do framebuffer de 4 MB para a GPU na Mali-400; o driver converte
+a textura na CPU). Framebuffer direto e threads ajudaram pouco.
+
+Perfil x86 (callgrind, 1280x720): paredes 37%, chao/teto 20%, wipe 10%
+(so em transicao), musica OPL 7%, sprites ~3%, status bar ~3%.
+Preenchimento (paredes+chao+sprites) ~60% do quadro; o resto (BSP, logica,
+audio) fica na CPU.
+
+Teste sintetico na Mali-400 (scripts/glbench.c, 1080p, ~6.8 mil
+retangulos, cena MAIS pesada que a real):
+- GPU pintando a cena: ~9.6 ms (~104 cenas/s so a GPU)
+- CPU montando vertices: ~4.2 ms (codigo sintetico, otimizavel)
+- upload dos vertices (0.5 MB): ~4.0 ms
+- imagem correta, sem tremer, com mediump
+Estimativa no core: 1080p ~35-40 fps (hoje ~12), 720p ~60 fps.
+
+Decisoes ja tomadas
+-------------------
+- Core option nova: prboom-render = software | gl  (env PRBOOM_RENDER).
+  Padrao: software ate o gl estar maduro; depois avaliar "auto".
+- No modo gl, se o frontend recusar o contexto: ERRO (sem fallback).
+- Exige reiniciar para trocar (o libretro so aceita SET_HW_RENDER no
+  retro_load_game).
+- Nada de GL de desktop antigo nem porte do GL do dsda/GZDoom: GLES 2 puro
+  com shader indexed (ideia do shader "indexed" do dsda-doom,
+  prboom2/data/lumps/gls_main.lmp: texel 8 bits -> linha da COLORMAP
+  pelo nivel de luz -> cor).
+
+Regras para GLES 2 / Mali-400 (aprendidas no glbench)
+-----------------------------------------------------
+- Sem highp no fragment shader: a coordenada de textura vai DIRETO do
+  varying para o texture2D, sem nenhuma conta no fragment (nada de fract,
+  escala, deslocamento). Contas so no vertex shader (highp garantido).
+  O resto e mediump: indice de paleta (0-255) e 32 niveis de luz cabem.
+- Coluna de parede: v linear ao longo da coluna; faixa de chao: u/v
+  lineares ao longo da linha. Os dois funcionam so com interpolacao.
+- Texturas indexadas GL_LUMINANCE 8 bits, GL_NEAREST, potencia de 2 com
+  GL_REPEAT (completar NPOT com padding). A repeticao vertical de parede
+  alta fica com o GL_REPEAT; se a textura nao for POT, a CPU corta o
+  retangulo onde a textura repete.
+- COLORMAP como textura 256x32 (ou 256x34 com as linhas de invuln.);
+  PLAYPAL aplicado nela (flash de dano/bonus = trocar a textura).
+- Agrupar o desenho POR TEXTURA: paredes e planos solidos nao se sobrepoem
+  na tela, a ordem dentro do grupo nao importa. Dezenas de draw calls por
+  quadro, nao milhares. Sprites/mascarados mantem a ordem (de tras para
+  frente), mas cada trecho opaco de coluna (post) vira um retangulo:
+  nao precisa de transparencia.
+- Indices de 16 bits (max 16383 retangulos por draw).
+- Vertices compactos (hoje 20 bytes em float no glbench; ir para ~12 com
+  int16) porque o upload na Mali-400 e lento.
+- Funcoes GL: o frontend pode devolver NULL no get_proc_address (EGL
+  antigo so entrega extensoes). Fallback: dlsym(RTLD_DEFAULT, nome) e
+  depois dlopen("libGLESv2.so.2").
+- Nenhum glFinish no caminho normal (so no benchmark).
+
+Onde ligar no codigo (vendor/prboom/src, via @patch)
+----------------------------------------------------
+- Paredes: o fork ja grava as paredes como registros para o render em
+  threads (r_drawcmd.c: R_DrawCmdReplay -> R_WallSliceSweep ->
+  R_DrawWallColumnRun em r_draw.c). No modo gl, a reproducao vira
+  retangulos em vez de pixels.
+- Chao/teto: r_plane.c (R_DoDrawPlane -> R_MapPlane -> R_DrawSpan):
+  cada faixa vira um retangulo (y, x1..x2, uv inicial e passo, colormap).
+- Ceu: R_DoDrawPlane trata o ceu como coluna de textura.
+- Sprites, texturas mascaradas e arma: r_things.c (R_DrawVisSprite,
+  R_DrawMasked...), cada post de coluna vira um retangulo.
+- 2D: v_video.c (V_DrawMemPatch = colunas de patch, V_FillRect,
+  V_CopyRect, V_DrawBackground), automap (V_DrawLine), status bar.
+  O widescreen (library/core/widescreen/) ja centraliza esse mapeamento.
+- libretro.c: SET_HW_RENDER GLES2, context_reset/destroy (recriar
+  texturas), get_current_framebuffer, video_cb(RETRO_HW_FRAME_BUFFER_VALID).
+
+Etapas (cada uma termina com algo para testar no ARM)
+-----------------------------------------------------
+1. Infraestrutura + paredes
+   - prboom-render, SET_HW_RENDER GLES2, fallback de funcoes GL
+   - cache de texturas indexadas (POT, REPEAT), COLORMAP+paleta, shader
+   - vertices compactos agrupados por textura
+   - paredes a partir dos registros de r_drawcmd.c
+   Pronto quando: E1M1 mostra as paredes iguais ao software (comparar
+   captura) e o log mostra fps/tempos no ARM.
+2. Chao, teto, ceu, sprites, texturas mascaradas, arma do jogador.
+   Pronto quando: a demo do DOOM1.WAD roda inteira igual ao software.
+3. 2D na GPU: status bar, menus (Dopo e Boom), HUD, texto, fundos de flat,
+   automap. Pronto quando: da para jogar so com o modo gl.
+4. Wipe (render em textura), fuzz e translucidez do Boom (aproximados no
+   inicio: GLES 2 nao le a tela no shader), widescreen, correcoes.
+5. Casos especiais: rampas (faixa inclinada nao e linear: dividir em
+   pedacos), PNG truecolor (variante RGBA do shader), brightmaps (segunda
+   textura), ceus do Hexen/skybox, Heretic/Hexen, cache de texturas com
+   descarte (pouca memoria na Mali-400), desempenho.
+
+Riscos e pendencias
+-------------------
+- Upload de vertices lento na Mali-400 (4 ms por 0.5 MB): compactar.
+- Diferenca de 1 texel na borda (GPU interpola em float, software avanca
+  em ponto fixo): raro, aceitar.
+- Translucidez/fuzz aproximados ate a etapa 4.
+- Memoria de textura em WADs grandes.
+- No frontend core-native-desktop: platform_get_proc_address
+  (lib/Backend_OpenGL/window/common.c) precisa do mesmo fallback dlsym,
+  senao nenhum core GL acha as funcoes no ARM.
+
+Outras otimizacoes ja feitas / medidas (contexto)
+-------------------------------------------------
+- library/core/render/wall_run.c: tabela composta por coluna no caminho
+  misto das paredes + NEON/SSE2 (-22% paredes, ~8% quadro, imagem
+  identica). Ainda NAO commitado neste momento.
+- prboom-render_threads (Auto): ~23% no x86; env PRBOOM_RENDER_THREADS.
+- Frontend: framebuffer direto (GET_CURRENT_SOFTWARE_FRAMEBUFFER) e
+  worker que roda o retro_run fora da thread principal (pipeline).
+  No netplay o quadro ainda roda na thread principal.
+- Nao resolvido ainda: audio estala quando o core fica abaixo de 60fps
+  (cada retro_run gera 1/60 s de som); 35fps (Framerate no menu)
+  corta ~40% do trabalho.
+
+Ferramentas (scripts/)
+----------------------
+- harness_shot.c: roda o core sem frontend, mede fps e salva quadros.
+    x86:   cc -O2 -I vendor/prboom/libretro/libretro-common/include \
+             -o shot prboomtv_libretro/scripts/harness_shot.c -ldl
+    armv7: vendor/zig/zig-x86_64-linux-0.16.0/zig cc -target \
+             arm-linux-gnueabihf -O2 -I ... -o shot-armv7 ... -ldl
+    uso:   ./shot core.so DOOM1.WAD <dir> <frames> [snap@N] [ini-fim:botao]
+           SHOT_VARS="prboom-resolution=1280x720,..." ou PRBOOM_* no env
+- glbench.c: core libretro GLES2 sintetico (o teste acima).
+    armv7: zig cc -target arm-linux-gnueabihf -O2 -shared -fPIC \
+             -I ... -o glbench_libretro.so glbench.c -ldl
+    uso:   ./core --plugin liblibretro_gecnd.so --play "libretro://glbench"
+           env: GLBENCH_RES, GLBENCH_LAYERS, GLBENCH_REPEAT, GLBENCH_GL=1
+           (GL de desktop, para RetroArch compilado sem GLES)
