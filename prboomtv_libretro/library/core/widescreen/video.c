@@ -15,17 +15,27 @@
 /* @endpatch */
 
 /**
- * @brief Stretched rectangles go through the page too.
+ * @brief Stretched rectangles go through the page too, scaled exactly as
+ * V_DrawMemPatch scales the patches they erase (16.16 factors, ends rather
+ * than sizes), and with the source at the scaled distance from the
+ * destination, so a widget's erase copies the very rows the whole status
+ * bar copy put there. Scaled any other way, an edge could land a row off
+ * and leave a seam (seen with gl, where the status bar updates only what
+ * changed).
  *
  * @patch src/v_video.c 279-284
  */
     const int page = dopo_wide_width();
-    srcx=dopo_wide_offset(flags, srcx)+srcx*page/320;
-    srcy=srcy*SCREENHEIGHT/200;
-    width=width*page/320;
-    height=height*SCREENHEIGHT/200;
-    destx=dopo_wide_offset(flags, destx)+destx*page/320;
-    desty=desty*SCREENHEIGHT/200;
+    const int DX = (page << 16) / 320;
+    const int DY = (SCREENHEIGHT << 16) / 200;
+    const int dx = ((destx - srcx) * DX) >> FRACBITS;
+    const int dy = ((desty - srcy) * DY) >> FRACBITS;
+    width  = (((destx + width) * DX) >> FRACBITS) - ((destx * DX) >> FRACBITS);
+    height = (((desty + height) * DY) >> FRACBITS) - ((desty * DY) >> FRACBITS);
+    destx  = dopo_wide_offset(flags, destx) + ((destx * DX) >> FRACBITS);
+    desty  = (desty * DY) >> FRACBITS;
+    srcx   = destx - dx;
+    srcy   = desty - dy;
 /* @endpatch */
 
 /**

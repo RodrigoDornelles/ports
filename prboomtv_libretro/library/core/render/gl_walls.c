@@ -116,4 +116,19 @@
          R_SpanTexture = (R_IsSyntheticFlat(pl->picnum) || tilt_plane
                           || plane_dynlit || plane_wallglow)
                        ? 0 : firstflat + flattranslation[pl->picnum] + 1;
+         dopo_gl_plane_begin(planeheight, light);
+/* @endpatch */
+
+/** @patch src/r_main.c 68 */
+#include "prboomtv/render_gl.h"
+/* @endpatch */
+
+/**
+ * @brief The black edge columns of a widened view fill gaps the software
+ * fill may leave; in gl the GPU leaves black wherever nothing paints, and
+ * drawing them would put CPU pixels in every row of the kept-keyed view.
+ *
+ * @patch src/r_main.c 1293-1293
+ */
+    else if (render_aspect != 0 && !dopo_gl)
 /* @endpatch */

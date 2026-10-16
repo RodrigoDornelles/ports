@@ -5,7 +5,8 @@
  *
  * GLES 2 only (a desktop GL 2 compatibility context runs the same shaders
  * when the frontend has no GLES). So far the GPU paints the wall and sky
- * columns and the floor and ceiling spans; everything else is still drawn by the CPU into the software
+ * columns, the floor and ceiling spans, the sprites and the masked
+ * textures; everything else is still drawn by the CPU into the software
  * frame, which is uploaded every frame and laid over the GPU columns. The
  * view starts each frame filled with a key colour, which only what the CPU
  * draws after the walls (flats, sprites, masked textures, HUD) covers, so
@@ -19,6 +20,7 @@
 #include "libretro.h"
 #include "doomtype.h"
 #include "r_draw.h"
+#include "r_patch.h"
 
 /** @brief prboom-render is gl; read in retro_load_game, fixed until the
  * core restarts (SET_HW_RENDER is only accepted there). */
@@ -26,8 +28,8 @@ extern dbool dopo_gl;
 
 /**
  * @brief The key colours the CPU leaves in the software frame: [0] where
- * a GPU column shows, [1] where it shows 15/16 as bright, under the fuzz
- * of a Spectre. Both 0 while gl is off.
+ * the GPU shows, [1] where it shows darkened, under the fuzz of a Spectre.
+ * Both 0 while gl is off.
  */
 extern uint16_t dopo_gl_keys[2];
 
@@ -90,11 +92,51 @@ void dopo_gl_walls_end(void);
 extern int R_SpanTexture;
 
 /**
+ * @brief R_DoDrawPlane starts making a plane into spans: its height over
+ * the view and its light level (the zlight row), for the rectangles the
+ * GPU makes of its spans.
+ */
+void dopo_gl_plane_begin(fixed_t height, int level);
+
+/**
  * @brief One floor or ceiling span of the view being replayed, queued for
  * the GPU. False when it stays in software (brightmap, translucent 3D
  * floor, another view, or R_SpanTexture 0).
  */
 dbool dopo_gl_span(const draw_span_vars_t *ds, int lump);
+
+/**
+ * @brief A sprite (lump of its patch, texnum -1) or a two-sided masked
+ * texture (texnum, lump -1) is about to be drawn post by post through
+ * R_DrawMaskedColumn; plain says it is opaque, without brightmap, tint or
+ * sloped edges; x1..x2 its columns. True when the GPU takes its posts
+ * (dopo_gl_masked_post),
+ * so the caller must use the R_DrawMaskedColumn path for every column.
+ */
+dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
+                           R_DrawColumn_f colfunc, dbool plain, int x1, int x2);
+
+/** @brief The masked draw started by dopo_gl_masked_begin is done. */
+void dopo_gl_masked_end(void);
+
+/**
+ * @brief One clipped post from R_DrawMaskedColumn, queued for the GPU in
+ * drawing order. False when the CPU draws it.
+ */
+dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn);
+
+/**
+ * @brief Rows y0..y1 of the frame (screen 0) were drawn on by the CPU:
+ * the GPU takes them from the software frame (render/gl.c, view_keyed).
+ * Called by the 2D drawing (v_video.c) and whatever else writes the frame.
+ */
+void dopo_gl_dirty(int y0, int y1);
+
+/** @brief Pixels [x0, x1) of rows [y0, y1) were drawn on (as above). */
+void dopo_gl_dirty_rect(int x0, int y0, int x1, int y1);
+
+/** @brief Whether the status bar redraws whole this frame (d_main.c). */
+dbool dopo_gl_statusbar_refresh(void);
 
 /** @brief Software renderer: logs fps and frame time like gl does. */
 void dopo_gl_software_frame(void);

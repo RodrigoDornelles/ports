@@ -11,6 +11,10 @@
  * with a pbuffer) and render into an FBO, read back for the snaps; every
  * frame ends with glFinish, so the fps counts the GPU too; the time spent
  * waiting in it is logged every 300 frames.
+ *   SHOT_SYNC=flush   glFlush instead: the GPU works while the core already
+ *                     builds the next frame, like a frontend that only
+ *                     presents the FBO (no glFinish); the fps is then the
+ *                     real throughput
  *   SHOT_NULL_PROC=1  get_proc_address answers NULL, like old Mali EGL
  *   SHOT_EGL=default  skip the surfaceless platform
  * SHOT_INFO=1 shows the core's info log too.
@@ -53,6 +57,7 @@ static void (*p_glFramebufferTexture2D)(unsigned, unsigned, unsigned, unsigned, 
 static unsigned (*p_glCheckFramebufferStatus)(unsigned);
 static void (*p_glReadPixels)(int, int, int, int, unsigned, unsigned, void *);
 static void (*p_glFinish)(void);
+static void (*p_glFlush)(void);
 static void (*p_glPixelStorei)(unsigned, int);
 
 static void *gl_lookup(const char *name)
@@ -122,7 +127,7 @@ static int egl_start(int desktop, unsigned w, unsigned h)
 #define G(name) *(void **)&p_##name = gl_lookup(#name); if (!p_##name) { fprintf(stderr, "missing %s\n", #name); return 0; }
    G(glGenFramebuffers) G(glBindFramebuffer) G(glGenTextures) G(glBindTexture)
    G(glTexImage2D) G(glTexParameteri) G(glFramebufferTexture2D)
-   G(glCheckFramebufferStatus) G(glReadPixels) G(glFinish) G(glPixelStorei)
+   G(glCheckFramebufferStatus) G(glReadPixels) G(glFinish) G(glFlush) G(glPixelStorei)
 #undef G
    p_glGenTextures(1, &tex);
    p_glBindTexture(0x0DE1, tex);
@@ -215,7 +220,9 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
    static uint8_t *hw_pixels;
    static size_t hw_size;
 
-   if (data == RETRO_HW_FRAME_BUFFER_VALID)
+   if (data == RETRO_HW_FRAME_BUFFER_VALID && getenv("SHOT_SYNC") && !strcmp(getenv("SHOT_SYNC"), "flush"))
+      p_glFlush();
+   else if (data == RETRO_HW_FRAME_BUFFER_VALID)
    {
       /* what the GPU (and the driver behind it) still owes the frame */
       struct timespec a, b;

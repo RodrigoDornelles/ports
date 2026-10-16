@@ -137,6 +137,65 @@ Etapa 1 feita no x86, falta medir no ARM:
 - No ARM: PRBOOM_RENDER=gl SHOT_VARS="prboom-resolution=1920x1080" \
     SHOT_INFO=1 ./shot-armv7 core.so DOOM1.WAD <dir> 2000 snap@1000
   (sem X: SHOT_EGL=default usa o display padrao do EGL da Mali).
+Etapa 2 em andamento (2026-10-16):
+- Chao/teto: todo span passa por R_SpanEmit (com ou sem threads) e vira
+  um quad de 1 px de altura com u/v lineares; flat 64x64 como esta, REPEAT.
+  O emissor anuncia o lump em R_SpanTexture. Software: flat sintetico,
+  rampa, luz dinamica, brightmap, 3D floor translucido. Vertice passou a
+  16 bytes (s,t float). ARM: o chao saiu da CPU (-16 ms) mas a GPU (+11)
+  e o envio de vertices (+4) comeram o ganho; quadro igual (96 ms).
+- Sprites, arma e texturas mascaradas: cada post recortado em
+  R_DrawMaskedColumn vira um quad numa lista em ordem (desenhada depois
+  das paredes/chao, um draw por sequencia da mesma textura). Sprite na GPU
+  pula os atalhos que escrevem direto no framebuffer. Software: fuzz
+  (Spectre), traduzido (cor de jogador), translucido, brightmap, tint,
+  borda inclinada, linha translucida. Se algo foi desenhado na CPU na
+  view, os posts da GPU repoem a chave embaixo deles (ordem correta).
+- Fuzz sobre a GPU: escurece 26/32 (como o fuzz original, COLORMAP 6);
+  15/16 deixava o Spectre quase invisivel (o fuzz 16-bit so aparece porque
+  acumula de coluna em coluna).
+- View na GPU, quadro software so onde ha conteudo: a view fica com a
+  chave entre quadros (pintada inteira so quando muda de lugar, a chave
+  muda, ou passou um quadro sem 3D). No present, cada linha da view e
+  marcada por quem desenhou nela (dopo_gl_dirty: V_DrawMemPatch,
+  V_FillRect, V_CopyRect, V_PlotPixel/linhas do automap, paginas cheias,
+  caches do d_main, skybox/portal, e os fallbacks do gl); vao para a GPU e
+  sao desenhadas por cima so essas linhas e as de fora da view (status
+  bar), que depois voltam a chave. Ler a view inteira para comparar custou
+  18 ms no ARM; ficou so uma linha em 32 por quadro, em rodizio, contra
+  quem escreve sem marcar (aparece em ate 32 quadros). A borda preta de 4 px do hor+ nao e
+  mais pintada em gl (a GPU ja deixa preto). Pillarbox e view reduzida
+  seguem o caminho completo. x86 1080p: ~300 de 1080 linhas enviadas,
+  gl passou o software (315-370 contra ~350 fps).
+- Linhas fora da view (status bar) so vao para a GPU quando mudam (cada
+  uma das duas texturas do quadro guarda o que ja recebeu). Em gl a
+  status bar volta a atualizar so os widgets que mudaram (o fork forca o
+  redesenho inteiro por causa do render direto); inteira depois de quadro
+  fora do caminho normal, troca de paleta, menu ou automap, e uma vez por
+  segundo (o apagamento parcial do upstream deixa a borda de um widget que
+  mudou de tamanho, ex. digito do ARMS ao pegar arma). O V_CopyRect do
+  widescreen passou a escalar como o V_DrawMemPatch (fatores 16.16, pontas
+  em vez de tamanho, origem a distancia escalada do destino): sobrava uma
+  linha do numero antigo ou do fundo vizinho. Isso muda ~300 pixels de
+  fundo da status bar tambem no software (agora alinhados).
+  ARM 1080p antes desta parte: 15.3 fps (65 ms), contra 20 do software no
+  harness (no frontend o software perde ~40 ms no envio do quadro).
+- Chao/teto em retangulos (opcao "2", 2026-10-16): spans seguidos do mesmo
+  plano com as mesmas pontas viram um quad; a distancia de cada canto vai
+  como clip w (o mapeamento do chao e projetivo, a GPU interpola exato) e
+  a luz sai por pixel da distancia numa textura com a tabela zlight
+  (linhas 0-15 niveis de luz, 16 sempre linha 0, 17 sempre 32). ~4-6 mil
+  spans viram ~700-1100 quads. A imagem deixa de bater pixel a pixel
+  (texels e faixas de luz podem mudar 1 px), visualmente igual.
+  Paredes continuam por coluna (juntar colunas arrisca fresta de 1 px).
+- Quadro software por retangulos (opcao "3"): as marcas viram uma lista de
+  retangulos (fundidos quando se tocam), em vez de um intervalo por linha
+  (que juntava widgets distantes da status bar numa faixa quase inteira).
+  Status bar inteira redesenhada so quando as cores da paleta mudam (nao
+  o ponteiro, que a mistura de paleta alterna a cada passo).
+- Harness: SHOT_SYNC=flush (sem glFinish, como o frontend) mede o regime
+  real. ARM 1080p antes de 2+3: gl 28 fps (35.5 ms) contra 20 do software;
+  o present (envio de linhas + vertices) era o maior pedaco.
 Pendente na transicao: translucidez do Boom sobre parede (mistura com a
 chave), tint de luz dinamica gravado como RMW, R_TintView (agua de 3D
 floor), wipe (le a chave: a melt mostra preto onde ha parede).
