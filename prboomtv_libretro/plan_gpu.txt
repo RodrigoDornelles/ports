@@ -93,6 +93,54 @@ Onde ligar no codigo (vendor/prboom/src, via @patch)
 - libretro.c: SET_HW_RENDER GLES2, context_reset/destroy (recriar
   texturas), get_current_framebuffer, video_cb(RETRO_HW_FRAME_BUFFER_VALID).
 
+Estado (2026-10-16)
+-------------------
+Etapa 1 feita no x86, falta medir no ARM:
+- library/core/render/gl.c (backend), gl_walls.c (hunks em r_drawcmd.c,
+  r_segs.c, r_plane.c, r_draw.c), gl_libretro.c (hunks em libretro.c);
+  include/prboomtv/render_gl.h. Opcao prboom-render antes de
+  prboom-render_threads (widescreen.c monta a lista).
+- Cada registro de parede/ceu leva o numero da textura (R_DrawCmdTexture,
+  anunciado por quem emite: os 3 niveis em r_segs.c e o ceu); a coluna sai
+  de (source - composite->pixels) / altura. Headers do upstream nao podem
+  ser patchados (o cmake recusa), por isso o campo fica no drawcmd_t.
+- Textura GL = composite em ordem de coluna (coluna x = linha x do GL), sem
+  transpor. Altura potencia de 2: um quad, tudo modulo a altura (cobre o
+  iscale que estoura para negativo em parede distante). Outra altura: um
+  quad por repeticao.
+- Tabela de cor: linhas do COLORMAP (34 por colormap, todos os colormaps
+  do Boom) ja passadas pela paleta 565 + uma linha so de paleta (desenhos
+  sem luz). Refeita quando a paleta muda.
+- Transicao ate a etapa 3: o resto continua na CPU; no inicio do replay
+  a view e preenchida (linha a linha) com uma cor-chave ausente da paleta
+  atual, e o que a CPU desenha depois (chao, sprites, colunas que ficaram
+  no software) cobre; sobra chave onde a GPU pinta. O quadro software
+  (sempre RGB565) e enviado e misturado com ONE, SRC_ALPHA: pixel normal
+  cobre, chave mostra a coluna. Esse envio e o custo que a etapa 3 tira.
+- Primeira medida no ARM, 1080p (chave ainda por coluna): walls 15 ms,
+  present 18 ms. A chave por coluna tocava uma linha de cache por pixel;
+  trocada pelo preenchimento da view (x86: 0.7 -> 0.5 ms). Os 18 ms do
+  present sao o envio do quadro de 4 MB (aparecem ate sem paredes).
+- Fuzz (Spectre) le o pixel vizinho: sobre a chave daria lixo/preto. O
+  fuzz 16-bit passa por dopo_gl_fuzz16: sobre chave vira a 2a chave, que a
+  GPU mostra como parede * 15/16 (sem o deslocamento: aproximado).
+- Cai no software (imagem exata): brightmap, luz colorida (tint), ceu alto
+  do Heretic (patch, nao composite), view fora do quadro (skybox 3D).
+- Comparacao (harness, demos do DOOM1.WAD, um snap a cada 50 quadros,
+  quantizado a 565): identico exceto o Spectre e 1-3 pixels de
+  arredondamento em alguns quadros; 720p, 1080p e widescreen desligado.
+- harness_shot.c agora roda cores GL: EGL sem janela + FBO + glReadPixels,
+  glFinish por quadro. SHOT_NULL_PROC=1 simula o EGL antigo da Mali (testado:
+  o fallback dlsym funciona). SHOT_INFO=1 mostra o log de tempos do core
+  (a cada 300 quadros: walls/present em ms de CPU, quads, draws, colunas
+  e quantas foram para o software).
+- No ARM: PRBOOM_RENDER=gl SHOT_VARS="prboom-resolution=1920x1080" \
+    SHOT_INFO=1 ./shot-armv7 core.so DOOM1.WAD <dir> 2000 snap@1000
+  (sem X: SHOT_EGL=default usa o display padrao do EGL da Mali).
+Pendente na transicao: translucidez do Boom sobre parede (mistura com a
+chave), tint de luz dinamica gravado como RMW, R_TintView (agua de 3D
+floor), wipe (le a chave: a melt mostra preto onde ha parede).
+
 Etapas (cada uma termina com algo para testar no ARM)
 -----------------------------------------------------
 1. Infraestrutura + paredes

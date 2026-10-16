@@ -86,19 +86,22 @@ int base_width_43 = 320;
 /* @endpatch */
 
 /**
- * @brief The 4:3 game goes out inside its 16:9 frame.
+ * @brief The 4:3 game goes out inside its 16:9 frame; in gl, through the
+ * GPU (render/gl.c).
  *
  * @patch libretro/libretro.c 3940-3940
  */
-   if (!dopo_widescreen)
    {
-      unsigned width;
-      size_t pitch;
-      const void *frame = dopo_pillarbox(screen_buf, &width, &pitch);
-      video_cb(frame, width, SCREENHEIGHT, pitch);
+      unsigned width = SCREENWIDTH;
+      size_t pitch = SCREENPITCH;
+      const void *frame = screen_buf;
+      if (!dopo_widescreen)
+         frame = dopo_pillarbox(screen_buf, &width, &pitch);
+      if (dopo_gl)
+         dopo_gl_present(video_cb, frame, width, SCREENHEIGHT, pitch);
+      else
+         video_cb(frame, width, SCREENHEIGHT, pitch);
    }
-   else
-      video_cb(screen_buf, SCREENWIDTH, SCREENHEIGHT, SCREENPITCH);
 /* @endpatch */
 
 /**
@@ -112,9 +115,10 @@ int base_width_43 = 320;
 
 /**
  * @brief The 4:3 game is copied into its frame, so it never renders
- * straight into the frontend's buffer.
+ * straight into the frontend's buffer; nor does gl, whose frame goes to
+ * the GPU.
  *
  * @patch libretro/libretro.c 4092-4092
  */
-   if (in_retro_run && environ_cb && dopo_widescreen)
+   if (in_retro_run && environ_cb && dopo_widescreen && !dopo_gl)
 /* @endpatch */

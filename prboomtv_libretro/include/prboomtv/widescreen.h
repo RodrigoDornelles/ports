@@ -37,7 +37,8 @@ extern int base_width_43;
 extern dbool dopo_hud_align;
 extern int dopo_hud_line_x;
 
-/** @brief Adds prboom-widescreen and makes the resolutions 16:9. */
+/** @brief Adds prboom-widescreen and makes the resolutions 16:9; also adds
+ * prboom-render (render_gl.h). */
 void dopo_widescreen_options(void);
 
 /** @brief Reads prboom-widescreen. */

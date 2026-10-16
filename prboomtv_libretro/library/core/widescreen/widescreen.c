@@ -12,6 +12,7 @@
 #include "doomstat.h"
 #include "v_video.h"
 #include "w_wad.h"
+#include "prboomtv/render_gl.h"
 #include "prboomtv/widescreen.h"
 
 dbool dopo_widescreen = TRUE;
@@ -72,6 +73,12 @@ void dopo_widescreen_options(void)
          memset(defs[count].values, 0, sizeof(defs[count].values));
          memcpy(defs[count].values, dopo_resolutions, sizeof(dopo_resolutions));
          defs[count++].default_value = "640x360";
+      }
+      else if (!strcmp(option_defs_us[i].key, "prboom-render_threads"))
+      {
+         /* who paints, then how many threads fill (render/gl.c) */
+         defs[count++] = dopo_gl_option;
+         defs[count++] = option_defs_us[i];
       }
       else
          defs[count++] = option_defs_us[i];

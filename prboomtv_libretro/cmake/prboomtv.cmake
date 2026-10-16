@@ -364,7 +364,7 @@ if (EMSCRIPTEN)
     set_target_properties(prboomtv_libretro PROPERTIES OUTPUT_NAME "prboomtv_libretro_emscripten")
 else()
     target_compile_definitions(prboomtv_libretro PRIVATE HAVE_THREADS HAVE_MMAP)
-    target_link_libraries(prboomtv_libretro PRIVATE m pthread)
+    target_link_libraries(prboomtv_libretro PRIVATE m pthread ${CMAKE_DL_LIBS})
     set_target_properties(prboomtv_libretro PROPERTIES
         OUTPUT_NAME "prboomtv_libretro"
         LINK_FLAGS "-Wl,--version-script=${PRBOOM_DIR}/libretro/link.T -Wl,--no-undefined")
