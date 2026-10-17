@@ -49,6 +49,7 @@
 #include "vid_mode.h"
 #include "w_wad.h"
 #include "prboomtv/render_gl.h"
+#include "prboomtv/scale2x.h"
 #include "prboomtv/shaders.h"
 #include "prboomtv/widescreen.h"
 
@@ -113,35 +114,7 @@ const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
    "auto"
 };
 
-/* prboom-scale: sprites and 2D patches sent at twice their size, through
- * Scale2x; 1 takes only the contour from it, 2 everything, 3 everything
- * and then the contour again (four times the size) */
-const struct retro_core_option_v2_definition dopo_gl_scale_option =
-{
-   "prboom-scale",
-   "Sprite Smoothing (gl only)",
-   NULL,
-   "Gives the GPU the monsters, items, the weapon and the 2D (status bar, "
-   "HUD, menus) at twice their size, smoothed with Scale2x, a filter that "
-   "only reuses the original pixels; only with the gl renderer. 'contour' "
-   "rounds off the outline and keeps the inside as it was; 'full' smooths "
-   "the inside too, where neighbouring pixels share a colour; 'full + 4x "
-   "contour' then rounds the outline once more, at four times the size "
-   "(four times the texture memory of 'full', for PCs).",
-   NULL,
-   NULL,
-   {
-      { "0", "Off" },
-      { "1", "Contour" },
-      { "2", "Full" },
-      { "3", "Full + 4x Contour" },
-      { NULL, NULL },
-   },
-   "2"
-};
-
-/* the prboom-scale in effect, and the one the patch textures were made with */
-static int   gl_scale = 2;
+/* the prboom-scale (scale2x.c) the patch textures were made with */
 static int   patchcache_scale = 0;
 static int   gl2d_patches_scale = 0;
 int R_DrawCmdTexture = 0;
@@ -874,11 +847,11 @@ static void gl_texcache_check(void)
       flatcache_owner = lumpinfo;
    }
    if (patchcache_owner != lumpinfo || patchcache_n != numlumps
-         || patchcache_scale != gl_scale)
+         || patchcache_scale != dopo_scale)
    {
       gl_cache_reset(&patchcache, &patchcache_n, numlumps);
       patchcache_owner = lumpinfo;
-      patchcache_scale = gl_scale;
+      patchcache_scale = dopo_scale;
    }
 }
 
@@ -941,102 +914,38 @@ static void gl_texture_upload(gltex_t *t, const rpatch_t *p)
    t->gl_height = cols;
 }
 
-/* Scale2x (EPX) on a w x h image of palette indices, GL2X_CLEAR where
- * transparent: each texel becomes four, each taking a neighbour's index
- * where two neighbours that meet at its corner agree. contour keeps the
- * index of every texel that stays opaque, so only the outline changes. */
-#define GL2X_CLEAR 0xffff
-static void gl_scale2x(const uint16_t *src, uint16_t *dst, int w, int h, dbool contour)
-{
-   int x, y, i;
-   for (y = 0; y < h; y++)
-      for (x = 0; x < w; x++)
-      {
-         const uint16_t e = src[y * w + x];
-         const uint16_t b = src[(y > 0 ? y - 1 : y) * w + x];
-         const uint16_t hh = src[(y < h - 1 ? y + 1 : y) * w + x];
-         const uint16_t d = src[y * w + (x > 0 ? x - 1 : x)];
-         const uint16_t f = src[y * w + (x < w - 1 ? x + 1 : x)];
-         uint16_t o[4] = { e, e, e, e };
-         uint16_t *row = dst + (size_t)(2 * y) * (2 * w) + 2 * x;
-         if (b != hh && d != f)
-         {
-            if (d == b) o[0] = d;
-            if (b == f) o[1] = f;
-            if (d == hh) o[2] = d;
-            if (hh == f) o[3] = f;
-         }
-         if (contour)
-            for (i = 0; i < 4; i++)
-               if ((o[i] == GL2X_CLEAR) == (e == GL2X_CLEAR))
-                  o[i] = e;
-         row[0] = o[0];
-         row[1] = o[1];
-         row[2 * w] = o[2];
-         row[2 * w + 1] = o[3];
-      }
-}
-
 /* A patch with its coverage, index and alpha, column x along GL row x;
- * with prboom-scale at twice its size through Scale2x, at 3 four times
- * (Scale2x again, the contour only). */
+ * with prboom-scale bigger through Scale2x (scale2x.c). */
 static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
 {
-   const int k = scale == 3 ? 4 : scale ? 2 : 1;
    const int rows = gl_pot(p->height), cols = gl_pot(p->width);
-   const int w = p->height, h = p->width;   /* along GL rows: a column */
-   uint16_t *src = NULL, *big = NULL, *mid = NULL;
+   uint16_t *img;
    uint8_t *buf;
-   int x, y, i;
+   int k, x, y;
 
    t->bad = TRUE;
    t->alpha = TRUE;
-   if (rows * k > max_texture_size || cols * k > max_texture_size)
+   img = dopo_scale_image(p, scale, &k);
+   if (!img)
       return;
-   buf = (uint8_t *)calloc((size_t)rows * cols * k * k, 2);
-   src = (uint16_t *)malloc(sizeof(uint16_t) * w * h);
-   if (k > 1)
-      big = (uint16_t *)malloc(sizeof(uint16_t) * w * h * k * k);
-   if (k > 2)
-      mid = (uint16_t *)malloc(sizeof(uint16_t) * w * h * 4);
-   if (!buf || !src || (k > 1 && !big) || (k > 2 && !mid))
+   if (rows * k > max_texture_size || cols * k > max_texture_size
+         || (buf = (uint8_t *)calloc((size_t)rows * cols * k * k, 2)) == NULL)
    {
-      free(buf);
-      free(src);
-      free(big);
-      free(mid);
+      free(img);
       return;
    }
-   for (i = 0; i < w * h; i++)
-      src[i] = GL2X_CLEAR;
-   for (x = 0; x < p->width; x++)
-   {
-      const rcolumn_t *column = &p->columns[x];
-      for (i = 0; i < column->numPosts; i++)
+   for (x = 0; x < p->width * k; x++)
+      for (y = 0; y < p->height * k; y++)
       {
-         const rpost_t *post = &column->posts[i];
-         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
-            src[x * w + y] = column->pixels[y];
-      }
-   }
-   if (k > 2)
-   {
-      gl_scale2x(src, mid, w, h, FALSE);
-      gl_scale2x(mid, big, w * 2, h * 2, TRUE);
-   }
-   else if (k > 1)
-      gl_scale2x(src, big, w, h, scale == 1);
-   for (x = 0; x < h * k; x++)
-      for (y = 0; y < w * k; y++)
-      {
-         const uint16_t c = k > 1 ? big[x * w * k + y] : src[x * w + y];
-         if (c != GL2X_CLEAR)
+         const uint16_t c = img[(size_t)x * p->height * k + y];
+         if (c != DOPO_SCALE_CLEAR)
          {
             uint8_t *d = buf + ((size_t)x * rows * k + y) * 2;
             d[0] = (uint8_t)c;
             d[1] = 255;
          }
       }
+   free(img);
    glGenTextures(1, &t->id);
    glBindTexture(GL_TEXTURE_2D, t->id);
    gl_texture_params(GL_CLAMP_TO_EDGE);
@@ -1044,9 +953,6 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, rows * k, cols * k, 0,
                 GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, buf);
    free(buf);
-   free(src);
-   free(big);
-   free(mid);
    t->gl_width  = rows;
    t->gl_height = cols;
    t->bad = FALSE;
@@ -1901,8 +1807,8 @@ static gltex_t *gl_patch(int lump, const rpatch_t *p)
    t = &patchcache[lump];
    if (!t->id && !t->bad)
    {
-      if (gl_scale)
-         gl_alpha_upload(t, p, gl_scale);
+      if (dopo_scale)
+         gl_alpha_upload(t, p, dopo_scale);
       else
          gl_texture_upload(t, p);
    }
@@ -2214,7 +2120,7 @@ void dopo_gl_frame_begin(void)
    gl2d_on = TRUE;
    gl_texcache_check();
    gl_colormap_update();
-   if (gl2d_patches_owner != lumpinfo || gl2d_patches_scale != gl_scale)
+   if (gl2d_patches_owner != lumpinfo || gl2d_patches_scale != dopo_scale)
    {
       int i;
       for (i = 0; i < GL2D_PATCHES; i++)
@@ -2225,7 +2131,7 @@ void dopo_gl_frame_begin(void)
          memset(&gl2d_patches[i].tex, 0, sizeof(gltex_t));
       }
       gl2d_patches_owner = lumpinfo;
-      gl2d_patches_scale = gl_scale;
+      gl2d_patches_scale = dopo_scale;
    }
 
    /* the whole frame keyed: everything the CPU no longer draws */
@@ -2299,7 +2205,7 @@ static gltex_t *gl2d_patch(const rpatch_t *p)
       return t->bad ? NULL : t;
    gl2d_patches[h].key = p;
    memset(t, 0, sizeof(*t));
-   gl_alpha_upload(t, p, gl_scale);
+   gl_alpha_upload(t, p, dopo_scale);
    return t->bad ? NULL : t;
 }
 
@@ -2685,16 +2591,6 @@ void dopo_gl_spectre_read(retro_environment_t environ_cb)
                       ? percent / 100.0f : gl_spectre_auto[gl_spectre];
 }
 
-void dopo_gl_scale_read(retro_environment_t environ_cb)
-{
-   struct retro_variable var = { "prboom-scale", NULL };
-
-   gl_scale = 2;
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
-         && (!strcmp(var.value, "0") || !strcmp(var.value, "1")
-             || !strcmp(var.value, "3")))
-      gl_scale = var.value[0] - '0';
-}
 
 static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
 {

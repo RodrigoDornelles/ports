@@ -14,6 +14,7 @@
 #include "w_wad.h"
 #include "prboomtv/frameskip.h"
 #include "prboomtv/render_gl.h"
+#include "prboomtv/scale2x.h"
 #include "prboomtv/widescreen.h"
 
 dbool dopo_widescreen = TRUE;
@@ -82,7 +83,7 @@ void dopo_widescreen_options(void)
          defs[count++] = dopo_gl_option;
          defs[count++] = dopo_gl_spectre_option;
          defs[count++] = dopo_gl_spectre_opacity_option;
-         defs[count++] = dopo_gl_scale_option;
+         defs[count++] = dopo_scale_option;
          defs[count++] = option_defs_us[i];
          defs[count++] = dopo_frameskip_option;
       }
