@@ -38,9 +38,10 @@
 /* @endpatch */
 
 /**
- * @brief prboom-spectre can change while playing.
+ * @brief prboom-spectre and prboom-scale can change while playing.
  *
  * @patch libretro/libretro.c 1525
  */
    dopo_gl_spectre_read(environ_cb);
+   dopo_gl_scale_read(environ_cb);
 /* @endpatch */

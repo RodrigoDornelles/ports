@@ -60,6 +60,13 @@ extern const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_opti
  * every change). */
 void dopo_gl_spectre_read(retro_environment_t environ_cb);
 
+/** @brief The prboom-scale core option (gl only): sprites and 2D patches
+ * at twice their size through Scale2x (0 off, 1 the contour, 2 all). */
+extern const struct retro_core_option_v2_definition dopo_gl_scale_option;
+
+/** @brief Reads prboom-scale (startup and every change). */
+void dopo_gl_scale_read(retro_environment_t environ_cb);
+
 /** @brief (see above) */
 extern const struct retro_core_option_v2_definition dopo_gl_option;
 
@@ -140,6 +147,15 @@ void dopo_gl_masked_end(void);
  * drawing order. False when the CPU draws it.
  */
 dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn);
+
+/**
+ * @brief A sprite column, before R_DrawMaskedColumn goes through its posts
+ * (dc->texu: the patch column, 16.16). With prboom-scale the GPU draws
+ * the whole column as one quad, the outline from the texture's coverage,
+ * and the posts that follow only put the key under themselves.
+ */
+void dopo_gl_masked_column(const rpatch_t *patch, const draw_column_vars_t *dc,
+                           const rcolumn_t *column, R_DrawColumn_f fn);
 
 /**
  * @brief Rows y0..y1 of the frame (screen 0) were drawn on by the CPU:

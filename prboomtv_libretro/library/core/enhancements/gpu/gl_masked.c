@@ -11,6 +11,15 @@
 /* @endpatch */
 
 /**
+ * @brief With prboom-scale a sprite column goes to the GPU whole, before
+ * its posts.
+ *
+ * @patch src/r_things.c 551
+ */
+  dopo_gl_masked_column(patch, dcvars, column, colfunc);
+/* @endpatch */
+
+/**
  * @brief The post goes to the GPU when the thing being drawn is on it.
  *
  * @patch src/r_things.c 595-595

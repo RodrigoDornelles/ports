@@ -112,6 +112,34 @@ const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
    },
    "auto"
 };
+
+/* prboom-scale: sprites and 2D patches sent at twice their size, through
+ * Scale2x; 1 takes only the contour from it, 2 everything */
+const struct retro_core_option_v2_definition dopo_gl_scale_option =
+{
+   "prboom-scale",
+   "Sprite Smoothing (gl only)",
+   NULL,
+   "Gives the GPU the monsters, items, the weapon and the 2D (status bar, "
+   "HUD, menus) at twice their size, smoothed with Scale2x, a filter that "
+   "only reuses the original pixels; only with the gl renderer. 'contour' "
+   "rounds off the outline and keeps the inside as it was; 'full' smooths "
+   "the inside too, where neighbouring pixels share a colour.",
+   NULL,
+   NULL,
+   {
+      { "0", "Off" },
+      { "1", "Contour" },
+      { "2", "Full" },
+      { NULL, NULL },
+   },
+   "0"
+};
+
+/* the prboom-scale in effect, and the one the patch textures were made with */
+static int   gl_scale = 0;
+static int   patchcache_scale = 0;
+static int   gl2d_patches_scale = 0;
 int R_DrawCmdTexture = 0;
 int R_SpanTexture = 0;
 
@@ -274,7 +302,8 @@ typedef struct
 } glvert_t;
 
 /* a wall texture (composite, columns along GL rows) or a flat (64x64,
- * as stored) */
+ * as stored); gl_width and gl_height count the patch's texels, a
+ * prboom-scale texture holding twice as many each way */
 typedef struct
 {
    GLuint         id;
@@ -282,6 +311,7 @@ typedef struct
    unsigned       stamp;                /* replay the patch below is from */
    const rpatch_t *patch;
    dbool          bad;                  /* too big for the GPU */
+   dbool          alpha;                /* index and coverage, prboom-scale */
    int            count, first;         /* quads this frame, while sorting */
 } gltex_t;
 
@@ -437,7 +467,8 @@ static int             cmap_lumprows[64];
 
 /* programs and buffers */
 static GLuint          wall_program = 0, frame_program = 0, plane_program = 0;
-static GLuint          fuzz_program = 0;
+static GLuint          fuzz_program = 0, sprite_program = 0;
+static GLint           sprite_u_scale, sprite_u_offset, sprite_u_tex, sprite_u_cmap;
 static GLuint          two_program = 0, copy_program = 0;
 static GLint           two_u_scale, two_u_offset, two_u_tex, two_u_trans, two_u_pal;
 static GLint           copy_u_scale, copy_u_offset, copy_u_tex;
@@ -613,7 +644,7 @@ static void gl_forget_objects(void)
       patchcache[i].id = 0;
    cmap_tex = 0;
    cmap_palette = NULL;
-   wall_program = frame_program = plane_program = fuzz_program = 0;
+   wall_program = frame_program = plane_program = fuzz_program = sprite_program = 0;
    two_program = copy_program = 0;
    two_vbo = pal_tex = trans_tex = ramp_tex = 0;
    gl2d_forget();
@@ -656,6 +687,7 @@ static void gl_context_reset(void)
       static const char *const plane_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb" };
       plane_program = gl_program(GL_SHADER(vert_plane), GL_SHADER(frag_plane), plane_attribs, 5);
       fuzz_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_fuzz), wall_attribs, 3);
+      sprite_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite), wall_attribs, 3);
       two_program  = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_2d), wall_attribs, 3);
       copy_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_copy), wall_attribs, 3);
       if (!two_program || !copy_program)
@@ -670,8 +702,12 @@ static void gl_context_reset(void)
       copy_u_tex    = glGetUniformLocation(copy_program, "u_tex");
       glGenBuffers(1, &two_vbo);
       gl2d_context();
-      if (!plane_program || !fuzz_program)
+      if (!plane_program || !fuzz_program || !sprite_program)
          return;
+      sprite_u_scale  = glGetUniformLocation(sprite_program, "u_scale");
+      sprite_u_offset = glGetUniformLocation(sprite_program, "u_offset");
+      sprite_u_tex    = glGetUniformLocation(sprite_program, "u_tex");
+      sprite_u_cmap   = glGetUniformLocation(sprite_program, "u_cmap");
       fuzz_u_scale  = glGetUniformLocation(fuzz_program, "u_scale");
       fuzz_u_offset = glGetUniformLocation(fuzz_program, "u_offset");
       fuzz_u_tex    = glGetUniformLocation(fuzz_program, "u_tex");
@@ -739,6 +775,7 @@ static void gl_context_destroy(void)
       glDeleteProgram(frame_program);
       glDeleteProgram(plane_program);
       glDeleteProgram(fuzz_program);
+      glDeleteProgram(sprite_program);
       glDeleteProgram(two_program);
       glDeleteProgram(copy_program);
       glDeleteBuffers(1, &two_vbo);
@@ -832,10 +869,12 @@ static void gl_texcache_check(void)
       gl_cache_reset(&flatcache, &flatcache_n, numlumps);
       flatcache_owner = lumpinfo;
    }
-   if (patchcache_owner != lumpinfo || patchcache_n != numlumps)
+   if (patchcache_owner != lumpinfo || patchcache_n != numlumps
+         || patchcache_scale != gl_scale)
    {
       gl_cache_reset(&patchcache, &patchcache_n, numlumps);
       patchcache_owner = lumpinfo;
+      patchcache_scale = gl_scale;
    }
 }
 
@@ -896,6 +935,107 @@ static void gl_texture_upload(gltex_t *t, const rpatch_t *p)
    free(buf);
    t->gl_width  = rows;
    t->gl_height = cols;
+}
+
+/* Scale2x (EPX) on a w x h image of palette indices, GL2X_CLEAR where
+ * transparent: each texel becomes four, each taking a neighbour's index
+ * where two neighbours that meet at its corner agree. contour keeps the
+ * index of every texel that stays opaque, so only the outline changes. */
+#define GL2X_CLEAR 0xffff
+static void gl_scale2x(const uint16_t *src, uint16_t *dst, int w, int h, dbool contour)
+{
+   int x, y, i;
+   for (y = 0; y < h; y++)
+      for (x = 0; x < w; x++)
+      {
+         const uint16_t e = src[y * w + x];
+         const uint16_t b = src[(y > 0 ? y - 1 : y) * w + x];
+         const uint16_t hh = src[(y < h - 1 ? y + 1 : y) * w + x];
+         const uint16_t d = src[y * w + (x > 0 ? x - 1 : x)];
+         const uint16_t f = src[y * w + (x < w - 1 ? x + 1 : x)];
+         uint16_t o[4] = { e, e, e, e };
+         uint16_t *row = dst + (size_t)(2 * y) * (2 * w) + 2 * x;
+         if (b != hh && d != f)
+         {
+            if (d == b) o[0] = d;
+            if (b == f) o[1] = f;
+            if (d == hh) o[2] = d;
+            if (hh == f) o[3] = f;
+         }
+         if (contour)
+            for (i = 0; i < 4; i++)
+               if ((o[i] == GL2X_CLEAR) == (e == GL2X_CLEAR))
+                  o[i] = e;
+         row[0] = o[0];
+         row[1] = o[1];
+         row[2 * w] = o[2];
+         row[2 * w + 1] = o[3];
+      }
+}
+
+/* A patch with its coverage, index and alpha, column x along GL row x;
+ * with prboom-scale at twice its size through Scale2x. */
+static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
+{
+   const int k = scale ? 2 : 1;
+   const int rows = gl_pot(p->height), cols = gl_pot(p->width);
+   const int w = p->height, h = p->width;   /* along GL rows: a column */
+   uint16_t *src = NULL, *big = NULL;
+   uint8_t *buf;
+   int x, y, i;
+
+   t->bad = TRUE;
+   t->alpha = TRUE;
+   if (rows * k > max_texture_size || cols * k > max_texture_size)
+      return;
+   buf = (uint8_t *)calloc((size_t)rows * cols * k * k, 2);
+   src = (uint16_t *)malloc(sizeof(uint16_t) * w * h);
+   if (k > 1)
+      big = (uint16_t *)malloc(sizeof(uint16_t) * w * h * 4);
+   if (!buf || !src || (k > 1 && !big))
+   {
+      free(buf);
+      free(src);
+      free(big);
+      return;
+   }
+   for (i = 0; i < w * h; i++)
+      src[i] = GL2X_CLEAR;
+   for (x = 0; x < p->width; x++)
+   {
+      const rcolumn_t *column = &p->columns[x];
+      for (i = 0; i < column->numPosts; i++)
+      {
+         const rpost_t *post = &column->posts[i];
+         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
+            src[x * w + y] = column->pixels[y];
+      }
+   }
+   if (k > 1)
+      gl_scale2x(src, big, w, h, scale == 1);
+   for (x = 0; x < h * k; x++)
+      for (y = 0; y < w * k; y++)
+      {
+         const uint16_t c = k > 1 ? big[x * w * k + y] : src[x * w + y];
+         if (c != GL2X_CLEAR)
+         {
+            uint8_t *d = buf + ((size_t)x * rows * k + y) * 2;
+            d[0] = (uint8_t)c;
+            d[1] = 255;
+         }
+      }
+   glGenTextures(1, &t->id);
+   glBindTexture(GL_TEXTURE_2D, t->id);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, rows * k, cols * k, 0,
+                GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, buf);
+   free(buf);
+   free(src);
+   free(big);
+   t->gl_width  = rows;
+   t->gl_height = cols;
+   t->bad = FALSE;
 }
 
 /* the texture of a record, its composite locked until the replay ends
@@ -1737,7 +1877,8 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
 /* ---- sprites and masked textures ---- */
 
 /* the patch of a sprite lump, laid out like a composite (column x is GL
- * row x); its transparent texels are never drawn, only its posts */
+ * row x); its transparent texels are never drawn, only its posts, or with
+ * prboom-scale its columns over a texture with coverage */
 static gltex_t *gl_patch(int lump, const rpatch_t *p)
 {
    gltex_t *t;
@@ -1745,7 +1886,12 @@ static gltex_t *gl_patch(int lump, const rpatch_t *p)
       return NULL;
    t = &patchcache[lump];
    if (!t->id && !t->bad)
-      gl_texture_upload(t, p);
+   {
+      if (gl_scale)
+         gl_alpha_upload(t, p, gl_scale);
+      else
+         gl_texture_upload(t, p);
+   }
    return t->bad ? NULL : t;
 }
 
@@ -1800,6 +1946,76 @@ void dopo_gl_masked_end(void)
    masked_fuzz = FALSE;
 }
 
+/* the colour table row of a masked column */
+static int gl_masked_row(const draw_column_vars_t *dc, R_DrawColumn_f fn)
+{
+   /* a fuzzy thing has no colormap: its own colours, full bright */
+   return masked_fuzz ? gl_colormap_row(fullcolormap)
+        : R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
+}
+
+/* A sprite column over a texture with coverage (prboom-scale): one quad
+ * from a texel above its first post to a texel below its last (Scale2x
+ * can cover half of those), clipped like the posts; the texture's
+ * coverage draws the outline. Pixel y samples frac(y) = texturemid +
+ * (y - centery) * iscale from the patch's top, column texu (16.16) picks
+ * one of the two texture columns of each patch column. */
+void dopo_gl_masked_column(const rpatch_t *patch, const draw_column_vars_t *dc,
+                           const rcolumn_t *column, R_DrawColumn_f fn)
+{
+   gltex_t *t = masked_tex;
+   const int64_t step = dc->iscale;
+   int64_t top, bottom, u;
+   int t0, t1, yl, yh, row;
+   double f0;
+   glvert_t *q;
+   float s0, s1, tc;
+
+   if (!t || !t->alpha || !column->numPosts || step <= 0)
+      return;
+   t0 = column->posts[0].topdelta - 1;
+   t1 = column->posts[column->numPosts - 1].topdelta
+      + column->posts[column->numPosts - 1].length + 1;
+   if (t0 < 0)
+      t0 = 0;
+   if (t1 > patch->height)
+      t1 = patch->height;
+   top    = (int64_t)sprtopscreen + (int64_t)spryscale * t0;
+   bottom = (int64_t)sprtopscreen + (int64_t)spryscale * t1;
+   yl = (int)((top + FRACUNIT - 1) >> FRACBITS);
+   yh = (int)((bottom - 1) >> FRACBITS);
+   if (yh >= mfloorclip[dc->x])
+      yh = mfloorclip[dc->x] - 1;
+   if (yl <= mceilingclip[dc->x])
+      yl = mceilingclip[dc->x] + 1;
+   if (yl < 0)
+      yl = 0;
+   if (yh >= viewheight)
+      yh = viewheight - 1;
+   row = gl_masked_row(dc, fn);
+   if (yl > yh || row < 0 || (q = gl_quad_in(&masked_q, t)) == NULL)
+      return;
+   u = dc->texu;
+   if (u < 0)
+      u = 0;
+   if (u > ((int64_t)patch->width << FRACBITS) - 1)
+      u = ((int64_t)patch->width << FRACBITS) - 1;
+   f0 = (double)dc->texturemid + (double)(yl - centery) * step;
+   s0 = (float)((f0 - step * 0.5) / 65536.0 / t->gl_width);
+   s1 = (float)((f0 + (yh - yl + 0.5) * step) / 65536.0 / t->gl_width);
+   tc = (float)(u / 65536.0 / t->gl_height);
+   q[0].x = q[3].x = (int16_t)(view_x0 + dc->x);
+   q[1].x = q[2].x = (int16_t)(view_x0 + dc->x + 1);
+   q[0].y = q[1].y = (int16_t)(view_y0 + yl);
+   q[2].y = q[3].y = (int16_t)(view_y0 + yh + 1);
+   q[0].s = q[1].s = s0;
+   q[2].s = q[3].s = s1;
+   q[0].t = q[1].t = q[2].t = q[3].t = tc;
+   q[0].l = q[1].l = q[2].l = q[3].l =
+      (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
+   masked_q.fuzz[masked_q.n - 1] = (uint8_t)masked_fuzz;
+}
+
 /* A post, clipped by R_DrawMaskedColumn: pixel y samples frac(y) =
  * texturemid + (y - centery) * iscale from the post's first texel, like a
  * wall column; the post sits topdelta texels down its patch column. */
@@ -1821,10 +2037,20 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
          gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
       return FALSE;
    }
+   if (t->alpha)
+   {
+      /* its column is already queued (dopo_gl_masked_column) */
+      if (view_software)
+      {
+         uint16_t *dest = view_topleft + (ptrdiff_t)dc->yl * SURFACE_SHORT_PITCH + dc->x;
+         for (y = dc->yl; y <= dc->yh; y++, dest += SURFACE_SHORT_PITCH)
+            *dest = dopo_gl_keys[0];
+      }
+      stat_posts++;
+      return TRUE;
+   }
    off = dc->source - p->pixels;
-   /* a fuzzy thing has no colormap: its own colours, full bright */
-   row = masked_fuzz ? gl_colormap_row(fullcolormap)
-       : R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
+   row = gl_masked_row(dc, fn);
    if (off < 0 || off >= (ptrdiff_t)p->width * p->height || step <= 0 || row < 0
          || (q = gl_quad_in(&masked_q, t)) == NULL)
       return gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
@@ -1974,7 +2200,7 @@ void dopo_gl_frame_begin(void)
    gl2d_on = TRUE;
    gl_texcache_check();
    gl_colormap_update();
-   if (gl2d_patches_owner != lumpinfo)
+   if (gl2d_patches_owner != lumpinfo || gl2d_patches_scale != gl_scale)
    {
       int i;
       for (i = 0; i < GL2D_PATCHES; i++)
@@ -1985,6 +2211,7 @@ void dopo_gl_frame_begin(void)
          memset(&gl2d_patches[i].tex, 0, sizeof(gltex_t));
       }
       gl2d_patches_owner = lumpinfo;
+      gl2d_patches_scale = gl_scale;
    }
 
    /* the whole frame keyed: everything the CPU no longer draws */
@@ -2041,14 +2268,12 @@ static int gl2d_trans(const uint8_t *trans)
    return trans_n++;
 }
 
-/* a patch with its coverage: index and alpha, column x along GL row x */
+/* a patch with its coverage (gl_alpha_upload), by its rpatch_t */
 static gltex_t *gl2d_patch(const rpatch_t *p)
 {
    unsigned h = (unsigned)(((uintptr_t)p >> 4) * 2654435761u) % GL2D_PATCHES;
    int probes;
    gltex_t *t;
-   uint8_t *buf;
-   int rows, cols, x, i;
 
    for (probes = 0; probes < GL2D_PATCHES; probes++, h = (h + 1) % GL2D_PATCHES)
       if (gl2d_patches[h].key == p || !gl2d_patches[h].key)
@@ -2060,39 +2285,8 @@ static gltex_t *gl2d_patch(const rpatch_t *p)
       return t->bad ? NULL : t;
    gl2d_patches[h].key = p;
    memset(t, 0, sizeof(*t));
-   rows = gl_pot(p->height);
-   cols = gl_pot(p->width);
-   if (rows > max_texture_size || cols > max_texture_size
-         || (buf = (uint8_t *)calloc((size_t)rows * cols, 2)) == NULL)
-   {
-      t->bad = TRUE;
-      return NULL;
-   }
-   for (x = 0; x < p->width; x++)
-   {
-      const rcolumn_t *column = &p->columns[x];
-      for (i = 0; i < column->numPosts; i++)
-      {
-         const rpost_t *post = &column->posts[i];
-         int y;
-         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
-         {
-            uint8_t *d = buf + ((size_t)x * rows + y) * 2;
-            d[0] = column->pixels[y];
-            d[1] = 255;
-         }
-      }
-   }
-   glGenTextures(1, &t->id);
-   glBindTexture(GL_TEXTURE_2D, t->id);
-   gl_texture_params(GL_CLAMP_TO_EDGE);
-   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, rows, cols, 0,
-                GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, buf);
-   free(buf);
-   t->gl_width  = rows;
-   t->gl_height = cols;
-   return t;
+   gl_alpha_upload(t, p, gl_scale);
+   return t->bad ? NULL : t;
 }
 
 /* corners top left, top right, bottom right, bottom left */
@@ -2477,6 +2671,16 @@ void dopo_gl_spectre_read(retro_environment_t environ_cb)
                       ? percent / 100.0f : gl_spectre_auto[gl_spectre];
 }
 
+void dopo_gl_scale_read(retro_environment_t environ_cb)
+{
+   struct retro_variable var = { "prboom-scale", NULL };
+
+   gl_scale = 0;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
+         && (!strcmp(var.value, "1") || !strcmp(var.value, "2")))
+      gl_scale = var.value[0] - '0';
+}
+
 static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
 {
    int i;
@@ -2519,6 +2723,17 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
          gl_fuzz_state(width, height, offset_x, TRUE);
          gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
          gl_fuzz_state(width, height, offset_x, FALSE);
+      }
+      else if (masked_q.tex[i]->alpha)
+      {
+         /* whole columns (prboom-scale): the coverage cuts the outline */
+         glUseProgram(sprite_program);
+         glUniform2f(sprite_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(sprite_u_offset, (float)offset_x, 0.0f);
+         glUniform1i(sprite_u_tex, 0);
+         glUniform1i(sprite_u_cmap, 1);
+         gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
+         glUseProgram(wall_program);
       }
       else
          gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
