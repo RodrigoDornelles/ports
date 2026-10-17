@@ -1,5 +1,5 @@
 /**
- * @brief The frontend's environment call, for the rooms (multiplayer/
+ * @brief The frontend's environment call, for the rooms (enhancements/multiplayer/
  * rooms.c), which live outside libretro.c where environ_cb is kept.
  */
 

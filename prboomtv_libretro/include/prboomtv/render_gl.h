@@ -1,6 +1,6 @@
 /**
  * @file render_gl.h
- * @brief prboom-render = gl (library/core/render/): the software renderer
+ * @brief prboom-render = gl (library/core/enhancements/gpu/): the software renderer
  * keeps deciding everything, the GPU paints (plan_gpu.txt).
  *
  * GLES 2 only (a desktop GL 2 compatibility context runs the same shaders
@@ -72,9 +72,10 @@ extern const struct retro_core_option_v2_definition dopo_gl_option;
 extern int R_DrawCmdTexture;
 
 /**
- * @brief Reads prboom-render and, for gl, asks the frontend for the GL
- * context. False only when gl was asked and the frontend refused it: the
- * game does not load (no fallback to software).
+ * @brief Reads prboom-render and, for gl or auto, asks the frontend for the
+ * GL context. auto falls back to software when it is refused; gl does not:
+ * False only when gl was asked and the frontend refused it, and the game
+ * does not load.
  */
 dbool dopo_gl_load(retro_environment_t environ_cb);
 
@@ -142,7 +143,7 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn);
 
 /**
  * @brief Rows y0..y1 of the frame (screen 0) were drawn on by the CPU:
- * the GPU takes them from the software frame (render/gl.c, view_keyed).
+ * the GPU takes them from the software frame (enhancements/gpu/gl.c, view_keyed).
  * Called by the 2D drawing (v_video.c) and whatever else writes the frame.
  */
 void dopo_gl_dirty(int y0, int y1);

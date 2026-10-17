@@ -23,7 +23,7 @@
  * The rest of the frame is still drawn by the CPU into the software
  * frame, uploaded every frame and blended over the columns: where a
  * column was queued the CPU left a key colour, which lets the column show
- * through (see gl_key_pick and frame_fs).
+ * through (see gl_key_pick and shaders/frag_frame.glsl).
  */
 #define _GNU_SOURCE
 #include <math.h>
@@ -49,6 +49,7 @@
 #include "vid_mode.h"
 #include "w_wad.h"
 #include "prboomtv/render_gl.h"
+#include "prboomtv/shaders.h"
 
 /* r_data.c, killough's marker lumps of the extra colormaps */
 extern int firstcolormaplump;
@@ -118,18 +119,20 @@ const struct retro_core_option_v2_definition dopo_gl_option =
    "prboom-render",
    "Renderer (Restart Required)",
    NULL,
-   "Who paints the 3D view. 'software' fills every pixel on the CPU, the "
-   "classic renderer. 'gl' keeps the CPU deciding what is seen and hands "
-   "the painting to the GPU through OpenGL ES 2, for high resolutions on "
-   "weak CPUs; still incomplete (walls and sky so far).",
+   "Who paints the 3D view. 'gl' keeps the CPU deciding what is seen and "
+   "hands the painting to the GPU through OpenGL ES 2, for high resolutions "
+   "on weak CPUs, and does not start without it. 'software' fills every "
+   "pixel on the CPU, the classic renderer. 'auto' uses gl when the "
+   "frontend gives an OpenGL context, software otherwise.",
    NULL,
    NULL,
    {
-      { "software", NULL },
+      { "auto",     NULL },
       { "gl",       NULL },
+      { "software", NULL },
       { NULL, NULL },
    },
-   "software"
+   "auto"
 };
 
 /* ---- the GLES 2 subset used, loaded at context reset ---- */
@@ -313,7 +316,14 @@ static dbool           view_active = FALSE;
  * key back under themselves, so they still cover it when in front */
 static dbool           view_software = FALSE;
 
-/* floors and ceilings in rectangles (see plane_vs) */
+/* Floors and ceilings in rectangles: rows of one plane with the same left
+ * and right ends drawn as one quad. The floor's texture mapping is
+ * projective on the screen, so with each corner's distance as the clip w
+ * the GPU interpolates it exactly; the light, a COLORMAP row per distance
+ * band (zlight), is looked up per pixel from the interpolated distance in
+ * a table texture (rows 0-15: light levels; 16: always row 0, the full
+ * bright of a glowing flat or the light amplification visor; 17: always
+ * row 32, invulnerability). The shaders are vert_plane and frag_plane. */
 typedef struct
 {
    int16_t  x, y;   /* frame pixels */
@@ -516,68 +526,9 @@ static dbool gl_load_functions(void)
 
 /* ---- shaders ---- */
 
-/* a column: texture coordinate and colour table row straight from the
- * attributes; positions in frame pixels, row 0 at the top */
-static const char *wall_vs =
-   "#version 100\n"
-   "attribute vec2 a_pos;\n"
-   "attribute vec2 a_st;\n"
-   "attribute float a_l;\n"
-   "uniform vec2 u_scale;\n"
-   "uniform vec2 u_offset;\n"
-   "varying vec2 v_uv;\n"
-   "varying float v_light;\n"
-   "void main() {\n"
-   "  vec2 p = (a_pos + u_offset) * u_scale;\n"
-   "  v_uv = a_st;\n"
-   "  v_light = a_l;\n"
-   "  gl_Position = vec4(p.x - 1.0, 1.0 - p.y, 0.0, 1.0);\n"
-   "}\n";
-
-/* texel (palette index) -> colour table at the column's light row; no sum
- * on v_uv before the first texture2D */
-static const char *wall_fs =
-   "#version 100\n"
-   "precision mediump float;\n"
-   "uniform sampler2D u_tex;\n"
-   "uniform sampler2D u_cmap;\n"
-   "varying vec2 v_uv;\n"
-   "varying float v_light;\n"
-   "void main() {\n"
-   "  float index = texture2D(u_tex, v_uv).r;\n"
-   "  gl_FragColor = texture2D(u_cmap, vec2(index * (255.0 / 256.0) + (0.5 / 256.0), v_light));\n"
-   "}\n";
-
-static const char *frame_vs =
-   "#version 100\n"
-   "attribute vec2 a_pos;\n"
-   "varying vec2 v_uv;\n"
-   "void main() {\n"
-   "  v_uv = vec2(a_pos.x, 1.0 - a_pos.y);\n"
-   "  gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);\n"
-   "}\n";
-
-/* the software frame, blended ONE, SRC_ALPHA over the columns: a pixel
- * of the frame covers them (alpha 0), the key lets them show (alpha 1),
- * the fuzz key darkens them as vanilla's fuzz did (COLORMAP row 6, 26/32:
- * the 16-bit fuzz's 15/16 only shows because it compounds from column to
- * column, which a single key cannot, and a Spectre must stay visible); a
- * key is within half a 565 step */
-static const char *frame_fs =
-   "#version 100\n"
-   "precision mediump float;\n"
-   "uniform sampler2D u_frame;\n"
-   "uniform vec3 u_keys[2];\n"
-   "varying vec2 v_uv;\n"
-   "float near(vec3 c, vec3 k) {\n"
-   "  vec3 d = abs(c - k);\n"
-   "  return max(max(d.r, d.g), d.b) < 0.004 ? 1.0 : 0.0;\n"
-   "}\n"
-   "void main() {\n"
-   "  vec3 c = texture2D(u_frame, v_uv).rgb;\n"
-   "  float keep = near(c, u_keys[0]) + near(c, u_keys[1]) * 0.8125;\n"
-   "  gl_FragColor = keep > 0.0 ? vec4(0.0, 0.0, 0.0, keep) : vec4(c, 0.0);\n"
-   "}\n";
+/* the shaders are in shaders/, embedded into prboomtv/shaders.h by
+ * dopo/scripts/xxd.cpp at build time */
+#define GL_SHADER(name) ((const char *)(name))
 
 static GLuint gl_compile(GLenum type, const char *src)
 {
@@ -631,71 +582,6 @@ static void gl_texture_params(GLint wrap)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
 }
 
-/* a fuzzy thing's post (prboom-spectre): the column's colour scaled and
- * offset for the blend of the chosen look */
-static const char *fuzz_fs =
-   "#version 100\n"
-   "precision mediump float;\n"
-   "uniform sampler2D u_tex;\n"
-   "uniform sampler2D u_cmap;\n"
-   "uniform vec4 u_mul;\n"
-   "uniform vec4 u_add;\n"
-   "varying vec2 v_uv;\n"
-   "varying float v_light;\n"
-   "void main() {\n"
-   "  float index = texture2D(u_tex, v_uv).r;\n"
-   "  vec4 c = texture2D(u_cmap, vec2(index * (255.0 / 256.0) + (0.5 / 256.0), v_light));\n"
-   "  gl_FragColor = c * u_mul + u_add;\n"
-   "}\n";
-
-/* Floors and ceilings in rectangles: rows of one plane with the same left
- * and right ends drawn as one quad. The floor's texture mapping is
- * projective on the screen, so with each corner's distance as the clip w
- * the GPU interpolates it exactly; the light, a COLORMAP row per distance
- * band (zlight), is looked up per pixel from the interpolated distance in
- * a table texture (rows 0-15: light levels; 16: always row 0, the full
- * bright of a glowing flat or the light amplification visor; 17: always
- * row 32, invulnerability). */
-static const char *plane_vs =
-   "#version 100\n"
-   "attribute vec2 a_pos;\n"
-   "attribute vec2 a_st;\n"
-   "attribute float a_w;\n"
-   "attribute float a_z;\n"
-   "attribute vec2 a_lb;\n"
-   "uniform vec2 u_scale;\n"
-   "uniform vec2 u_offset;\n"
-   "varying vec2 v_st;\n"
-   "varying float v_z;\n"
-   "varying float v_lev;\n"
-   "varying float v_base;\n"
-   "void main() {\n"
-   "  vec2 p = (a_pos + u_offset) * u_scale;\n"
-   "  v_st = a_st;\n"
-   "  v_z = a_z;\n"
-   "  v_lev = (a_lb.x + 0.5) / 32.0;\n"
-   "  v_base = a_lb.y;\n"
-   "  gl_Position = vec4((p.x - 1.0) * a_w, (1.0 - p.y) * a_w, 0.0, a_w);\n"
-   "}\n";
-
-static const char *plane_fs =
-   "#version 100\n"
-   "precision mediump float;\n"
-   "uniform sampler2D u_tex;\n"
-   "uniform sampler2D u_cmap;\n"
-   "uniform sampler2D u_zlight;\n"
-   "uniform float u_rows;\n"
-   "varying vec2 v_st;\n"
-   "varying float v_z;\n"
-   "varying float v_lev;\n"
-   "varying float v_base;\n"
-   "void main() {\n"
-   "  float index = texture2D(u_tex, v_st).r;\n"
-   "  float r = floor(texture2D(u_zlight, vec2(v_z, v_lev)).r * 255.0 + 0.5);\n"
-   "  gl_FragColor = texture2D(u_cmap, vec2(index * (255.0 / 256.0) + (0.5 / 256.0),\n"
-   "                                        (r + v_base + 0.5) / u_rows));\n"
-   "}\n";
-
 /* ---- context ---- */
 
 /* every GL name died with the context; nothing is deleted */
@@ -736,8 +622,8 @@ static void gl_context_reset(void)
            (const char *)glGetString(GL_RENDERER),
            (const char *)glGetString(GL_VERSION), max_texture_size);
 
-   wall_program = gl_program(wall_vs, wall_fs, wall_attribs, 3);
-   frame_program = gl_program(frame_vs, frame_fs, frame_attribs, 1);
+   wall_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_wall), wall_attribs, 3);
+   frame_program = gl_program(GL_SHADER(vert_frame), GL_SHADER(frag_frame), frame_attribs, 1);
    if (!wall_program || !frame_program)
       return;
    wall_u_scale  = glGetUniformLocation(wall_program, "u_scale");
@@ -748,8 +634,8 @@ static void gl_context_reset(void)
    frame_u_keys  = glGetUniformLocation(frame_program, "u_keys");
    {
       static const char *const plane_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb" };
-      plane_program = gl_program(plane_vs, plane_fs, plane_attribs, 5);
-      fuzz_program = gl_program(wall_vs, fuzz_fs, wall_attribs, 3);
+      plane_program = gl_program(GL_SHADER(vert_plane), GL_SHADER(frag_plane), plane_attribs, 5);
+      fuzz_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_fuzz), wall_attribs, 3);
       if (!plane_program || !fuzz_program)
          return;
       fuzz_u_scale  = glGetUniformLocation(fuzz_program, "u_scale");
@@ -829,10 +715,18 @@ static void gl_context_destroy(void)
 dbool dopo_gl_load(retro_environment_t environ_cb)
 {
    struct retro_variable var = { "prboom-render", NULL };
+   dbool required;
 
    dopo_gl = FALSE;
-   if (!environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value
-         || strcmp(var.value, "gl"))
+   if (!environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value)
+      var.value = "auto";
+   required = !strcmp(var.value, "gl");
+#ifdef __EMSCRIPTEN__
+   /* gl has not been tried in the web frontend yet: auto stays software */
+   if (!required)
+      var.value = "software";
+#endif
+   if (!required && strcmp(var.value, "auto"))
    {
       lprintf(LO_INFO, "prboom-render software\n");
       return TRUE;
@@ -855,6 +749,12 @@ dbool dopo_gl_load(retro_environment_t environ_cb)
       hw.context_type = RETRO_HW_CONTEXT_OPENGL;
       if (!environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw))
       {
+         if (!required)
+         {
+            lprintf(LO_INFO, "prboom-render software (auto: the frontend "
+                    "gave no OpenGL context)\n");
+            return TRUE;
+         }
          lprintf(LO_ERROR, "prboom-render gl: the frontend refused an OpenGL "
                  "ES 2 or OpenGL context; set prboom-render to software\n");
          return FALSE;

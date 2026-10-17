@@ -1,6 +1,6 @@
 /**
  * @brief Cheats from Dopo Options > Cheats (library/core/cheats/), set through
- * multiplayer/settings.c so a netgame changes them on every machine at
+ * enhancements/multiplayer/settings.c so a netgame changes them on every machine at
  * the same tic.
  */
 #ifndef PRBOOMTV_CHEATS_H

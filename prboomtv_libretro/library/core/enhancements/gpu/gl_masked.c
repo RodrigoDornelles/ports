@@ -1,6 +1,6 @@
 /**
  * @brief prboom-render = gl: sprites, the player's weapon and two-sided
- * masked textures go to the GPU post by post (render/gl.c). Every post is
+ * masked textures go to the GPU post by post (enhancements/gpu/gl.c). Every post is
  * clipped by R_DrawMaskedColumn exactly as before; there the GPU takes it
  * instead of the column drawer. A sprite the GPU takes skips the direct
  * framebuffer paths, which bypass R_DrawMaskedColumn.

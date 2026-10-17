@@ -1,8 +1,8 @@
 /**
- * @brief prboom-render = gl on the frontend side (render/gl.c): the GL
+ * @brief prboom-render = gl on the frontend side (enhancements/gpu/gl.c): the GL
  * context is asked for when the game loads, and the software frame the
  * CPU still draws is 16-bit, the format the GPU lays over its columns.
- * The frame goes out through dopo_gl_present (widescreen/libretro.c).
+ * The frame goes out through dopo_gl_present (enhancements/widescreen/libretro.c).
  */
 
 /** @patch libretro/libretro.c 64 */
@@ -30,7 +30,7 @@
 
 /**
  * @brief The software frame drawn straight into the frontend's buffer is
- * counted too (render/gl.c), to compare with gl.
+ * counted too (enhancements/gpu/gl.c), to compare with gl.
  *
  * @patch libretro/libretro.c 3919
  */

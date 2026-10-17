@@ -77,7 +77,7 @@ void dopo_widescreen_options(void)
       }
       else if (!strcmp(option_defs_us[i].key, "prboom-render_threads"))
       {
-         /* who paints, how many threads fill (render/gl.c), how many
+         /* who paints, how many threads fill (enhancements/gpu/gl.c), how many
           * frames are drawn (dopo/frameskip.c) */
          defs[count++] = dopo_gl_option;
          defs[count++] = dopo_gl_spectre_option;

@@ -39,8 +39,10 @@ Estimativa no core: 1080p ~35-40 fps (hoje ~12), 720p ~60 fps.
 
 Decisoes ja tomadas
 -------------------
-- Core option nova: prboom-render = software | gl  (env PRBOOM_RENDER).
-  Padrao: software ate o gl estar maduro; depois avaliar "auto".
+- Core option nova: prboom-render = auto | gl | software (env
+  PRBOOM_RENDER). Padrao auto: gl quando o frontend da o contexto OpenGL,
+  software quando recusa (no wasm, auto ainda e software: gl nao testado
+  no RetroArch web). Harness: SHOT_NO_HW=1 recusa o contexto.
 - No modo gl, se o frontend recusar o contexto: ERRO (sem fallback).
 - Exige reiniciar para trocar (o libretro so aceita SET_HW_RENDER no
   retro_load_game).
@@ -89,14 +91,14 @@ Onde ligar no codigo (vendor/prboom/src, via @patch)
   R_DrawMasked...), cada post de coluna vira um retangulo.
 - 2D: v_video.c (V_DrawMemPatch = colunas de patch, V_FillRect,
   V_CopyRect, V_DrawBackground), automap (V_DrawLine), status bar.
-  O widescreen (library/core/widescreen/) ja centraliza esse mapeamento.
+  O widescreen (library/core/enhancements/widescreen/) ja centraliza esse mapeamento.
 - libretro.c: SET_HW_RENDER GLES2, context_reset/destroy (recriar
   texturas), get_current_framebuffer, video_cb(RETRO_HW_FRAME_BUFFER_VALID).
 
 Estado (2026-10-16)
 -------------------
 Etapa 1 feita no x86, falta medir no ARM:
-- library/core/render/gl.c (backend), gl_walls.c (hunks em r_drawcmd.c,
+- library/core/enhancements/gpu/gl.c (backend), gl_walls.c (hunks em r_drawcmd.c,
   r_segs.c, r_plane.c, r_draw.c), gl_libretro.c (hunks em libretro.c);
   include/prboomtv/render_gl.h. Opcao prboom-render antes de
   prboom-render_threads (widescreen.c monta a lista).
@@ -233,9 +235,10 @@ Riscos e pendencias
 
 Outras otimizacoes ja feitas / medidas (contexto)
 -------------------------------------------------
-- library/core/render/wall_run.c: tabela composta por coluna no caminho
-  misto das paredes + NEON/SSE2 (-22% paredes, ~8% quadro, imagem
-  identica). Ainda NAO commitado neste momento.
+- library/core/render/wall_run.c (tabela composta por coluna no caminho
+  misto das paredes + NEON/SSE2: -22% paredes, ~8% quadro, ~2 fps no
+  software a 1080p no ARM) foi removido: o esforco vai para o gl, o
+  software fica como no upstream.
 - prboom-render_threads (Auto): ~23% no x86; env PRBOOM_RENDER_THREADS.
 - Frontend: framebuffer direto (GET_CURRENT_SOFTWARE_FRAMEBUFFER) e
   worker que roda o retro_run fora da thread principal (pipeline).

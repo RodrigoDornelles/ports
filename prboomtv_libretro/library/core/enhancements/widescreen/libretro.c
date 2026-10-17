@@ -1,7 +1,7 @@
 /**
  * @brief The prboom-widescreen core option on the frontend side: the
  * option itself, the 16:9 resolutions, the aspect it forces and the 16:9
- * frame around the classic 4:3 game (widescreen/widescreen.c).
+ * frame around the classic 4:3 game (enhancements/widescreen/widescreen.c).
  */
 
 /**
@@ -87,7 +87,7 @@ int base_width_43 = 320;
 
 /**
  * @brief The 4:3 game goes out inside its 16:9 frame; in gl, through the
- * GPU (render/gl.c).
+ * GPU (enhancements/gpu/gl.c).
  *
  * @patch libretro/libretro.c 3940-3940
  */

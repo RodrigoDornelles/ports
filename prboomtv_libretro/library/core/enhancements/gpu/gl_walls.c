@@ -1,7 +1,7 @@
 /**
  * @brief prboom-render = gl: the wall and sky records and the floor and
  * ceiling spans go to the GPU
- * (render/gl.c). Each record carries the texture its column comes from,
+ * (enhancements/gpu/gl.c). Each record carries the texture its column comes from,
  * which the emitters announce in R_DrawCmdTexture; the replay hands every
  * record to dopo_gl_wall and draws in software only what the GPU cannot
  * reproduce.

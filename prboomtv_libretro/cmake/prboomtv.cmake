@@ -289,6 +289,26 @@ if (prboomtv_font_result)
     message(FATAL_ERROR "prboomtv: failed to convert the Odamex font\n${prboomtv_font_error}")
 endif()
 
+# the GPU renderer's shaders, embedded as C arrays named after their files
+# (dopo/scripts/xxd.cpp) into include/prboomtv/shaders.h of the build tree;
+# a shader that changes reconfigures, the header is only rewritten on change
+dopo_host_tool(dopo_xxd "${DOPO_DIR}/scripts/xxd.cpp")
+file(GLOB prboomtv_shaders CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/library/core/enhancements/gpu/shaders/*.glsl")
+list(SORT prboomtv_shaders)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_shaders})
+set(PRBOOMTV_INCLUDE_GENERATED "${CMAKE_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv")
+execute_process(
+    COMMAND "${dopo_xxd_TOOL}" ${prboomtv_shaders}
+    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/shaders.h"
+    RESULT_VARIABLE prboomtv_xxd_result
+    ERROR_VARIABLE prboomtv_xxd_error)
+if (prboomtv_xxd_result)
+    message(FATAL_ERROR "prboomtv: failed to embed the shaders\n${prboomtv_xxd_error}")
+endif()
+file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/shaders.h"
+    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/shaders.h" ONLY_IF_DIFFERENT)
+
 set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
 dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files})
 
@@ -326,7 +346,8 @@ if (EMSCRIPTEN)
 else()
     add_library(prboomtv_libretro SHARED "${prboomtv_files}")
 endif()
-target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include")
+target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include"
+    "${PRBOOMTV_INCLUDE_GENERATED}")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
     "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}

@@ -1,6 +1,6 @@
 /**
  * @file widescreen.h
- * @brief The prboom-widescreen core option (library/core/widescreen/);
+ * @brief The prboom-widescreen core option (library/core/enhancements/widescreen/);
  * the game is always shown in 16:9:
  * - enabled, the default: the 3D view is widened (hor+), while the status
  *   bar, menus and full-screen pages keep their 4:3 proportions,

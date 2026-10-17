@@ -1,6 +1,6 @@
 /**
  * @brief prboom-render = gl: whatever draws on the frame with the CPU
- * marks the rows it touches (dopo_gl_dirty, render/gl.c), so only those
+ * marks the rows it touches (dopo_gl_dirty, enhancements/gpu/gl.c), so only those
  * rows of the software frame go to the GPU. Writers that do not mark are
  * still caught, a few frames later, by a sparse comparison with the key.
  */

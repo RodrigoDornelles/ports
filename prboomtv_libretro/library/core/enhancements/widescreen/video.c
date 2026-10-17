@@ -1,6 +1,6 @@
 /**
  * @brief In 16:9 the 320x200 page is drawn 4:3 in the middle of the
- * screen instead of stretched over all of it (widescreen/ratio.c):
+ * screen instead of stretched over all of it (enhancements/widescreen/widescreen.c):
  * patches, rectangles and full-screen pages map through the page's
  * width and offset, and full-screen pages get the border flat on the
  * sides.

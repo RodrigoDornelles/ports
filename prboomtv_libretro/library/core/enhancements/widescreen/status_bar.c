@@ -1,5 +1,5 @@
 /**
- * @brief In 16:9 the status bars stay 4:3 in the middle (widescreen/
+ * @brief In 16:9 the status bars stay 4:3 in the middle (enhancements/widescreen/
  * video.c moves their patches) with the border flat on the sides, and
  * Heretic's fullscreen HUD sticks to the screen edges.
  */

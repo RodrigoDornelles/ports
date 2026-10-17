@@ -1,6 +1,6 @@
 /**
  * @brief Admin actions that change the game: they run inside a game tic,
- * the same on every machine (multiplayer/session.c stamps them).
+ * the same on every machine (enhancements/multiplayer/session.c stamps them).
  */
 #include "doomstat.h"
 #include "p_inter.h"
