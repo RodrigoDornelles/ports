@@ -240,9 +240,15 @@ Outras otimizacoes ja feitas / medidas (contexto)
 - Frontend: framebuffer direto (GET_CURRENT_SOFTWARE_FRAMEBUFFER) e
   worker que roda o retro_run fora da thread principal (pipeline).
   No netplay o quadro ainda roda na thread principal.
-- Nao resolvido ainda: audio estala quando o core fica abaixo de 60fps
-  (cada retro_run gera 1/60 s de som); 35fps (Framerate no menu)
-  corta ~40% do trabalho.
+- Audio estalando / jogo lento abaixo de 60fps (cada retro_run gera 1/60 s
+  de som e avanca 1/60 s de jogo): opcao prboom-frameskip (0 / 1 / 2, env
+  PRBOOM_FRAMESKIP; library/core/dopo/frameskip.c): desenha 1 quadro a
+  cada 2 / 3. O quadro pulado roda tics, entrada e som e so nao chama o
+  D_Display (video_cb NULL, o frontend repete); nunca durante a melt. Um
+  "auto" (pular quando atrasado) foi tentado e tirado. Harness:
+  SHOT_SLOW_MS simula aparelho lento, SHOT_SLOW_LOG conta os desenhados.
+  35fps (Framerate no menu do prboom) ainda nao tem core option
+  (prboom-fps planejado na feature/prboomtv).
 
 Ferramentas (scripts/)
 ----------------------

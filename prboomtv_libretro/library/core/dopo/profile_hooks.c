@@ -38,6 +38,7 @@
 /* @endpatch */
 
 /** @patch src/d_main.c 103 */
+#include "prboomtv/frameskip.h"
 #include "prboomtv/profile.h"
 /* @endpatch */
 
@@ -101,10 +102,18 @@
    dopo_prof_end(DOPO_PROF_TICS);
 /* @endpatch */
 
-/** @patch src/d_main.c 1954-1954 */
-   dopo_prof_begin(DOPO_PROF_DISPLAY);
-   D_Display();
-   dopo_prof_end(DOPO_PROF_DISPLAY);
+/**
+ * @brief prboom-frameskip may skip the drawing (never a melt, nor the
+ * frame that starts one).
+ *
+ * @patch src/d_main.c 1954-1954
+ */
+   if (in_d_wipe || gamestate != wipegamestate || dopo_frameskip_draw())
+   {
+      dopo_prof_begin(DOPO_PROF_DISPLAY);
+      D_Display();
+      dopo_prof_end(DOPO_PROF_DISPLAY);
+   }
 /* @endpatch */
 
 /** @patch src/r_main.c 69 */

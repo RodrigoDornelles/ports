@@ -18,6 +18,8 @@
  *   SHOT_NULL_PROC=1  get_proc_address answers NULL, like old Mali EGL
  *   SHOT_EGL=default  skip the surfaceless platform
  * SHOT_INFO=1 shows the core's info log too.
+ * SHOT_SLOW_MS=n makes every drawn frame n ms slower (a slow device, for
+ * prboom-frameskip=auto); SHOT_SLOW_LOG=1 prints how many were drawn.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -210,6 +212,8 @@ static bool env_cb(unsigned cmd, void *data)
    }
 }
 
+static int g_drawn;
+
 static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 {
    char path[1024];
@@ -219,6 +223,16 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 
    static uint8_t *hw_pixels;
    static size_t hw_size;
+
+   if (data)
+   {
+      g_drawn++;
+      if (getenv("SHOT_SLOW_MS"))
+      {
+         struct timespec d = { 0, atoi(getenv("SHOT_SLOW_MS")) * 1000000L };
+         nanosleep(&d, NULL);
+      }
+   }
 
    if (data == RETRO_HW_FRAME_BUFFER_VALID && getenv("SHOT_SYNC") && !strcmp(getenv("SHOT_SYNC"), "flush"))
       p_glFlush();
@@ -379,6 +393,8 @@ int main(int argc, char **argv)
          double secs = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
          fprintf(stderr, "core only: %d frames in %.2fs = %.1f fps\n",
                  frames - warm, secs, (frames - warm) / secs);
+         if (getenv("SHOT_SLOW_LOG"))
+            fprintf(stderr, "drawn: %d of %d frames\n", g_drawn, frames);
       }
    }
    retro_unload_game();

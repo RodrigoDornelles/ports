@@ -12,6 +12,7 @@
 #include "doomstat.h"
 #include "v_video.h"
 #include "w_wad.h"
+#include "prboomtv/frameskip.h"
 #include "prboomtv/render_gl.h"
 #include "prboomtv/widescreen.h"
 
@@ -76,9 +77,11 @@ void dopo_widescreen_options(void)
       }
       else if (!strcmp(option_defs_us[i].key, "prboom-render_threads"))
       {
-         /* who paints, then how many threads fill (render/gl.c) */
+         /* who paints, how many threads fill (render/gl.c), how many
+          * frames are drawn (dopo/frameskip.c) */
          defs[count++] = dopo_gl_option;
          defs[count++] = option_defs_us[i];
+         defs[count++] = dopo_frameskip_option;
       }
       else
          defs[count++] = option_defs_us[i];
