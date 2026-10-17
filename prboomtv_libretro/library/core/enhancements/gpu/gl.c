@@ -133,11 +133,11 @@ const struct retro_core_option_v2_definition dopo_gl_scale_option =
       { "2", "Full" },
       { NULL, NULL },
    },
-   "0"
+   "2"
 };
 
 /* the prboom-scale in effect, and the one the patch textures were made with */
-static int   gl_scale = 0;
+static int   gl_scale = 2;
 static int   patchcache_scale = 0;
 static int   gl2d_patches_scale = 0;
 int R_DrawCmdTexture = 0;
@@ -2675,9 +2675,9 @@ void dopo_gl_scale_read(retro_environment_t environ_cb)
 {
    struct retro_variable var = { "prboom-scale", NULL };
 
-   gl_scale = 0;
+   gl_scale = 2;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
-         && (!strcmp(var.value, "1") || !strcmp(var.value, "2")))
+         && (!strcmp(var.value, "0") || !strcmp(var.value, "1")))
       gl_scale = var.value[0] - '0';
 }
 
