@@ -89,6 +89,31 @@
 /* @endpatch */
 
 /**
+ * @brief The sky goes into the wall records with gl even on one render
+ * thread, so the GPU paints it: drawn straight into the keyed frame, the
+ * CPU's sky never reached the screen (black windows to the sky).
+ *
+ * @patch src/r_plane.c 1816-1816
+ */
+  if (R_GetRenderThreads() <= 1 && !dopo_gl)
+/* @endpatch */
+
+/**
+ * @brief ...and the plane pass skips it, as the threaded path does; only
+ * the main view emits it (R_DrawPlanesEmitSky), not a skybox scene.
+ *
+ * @patch src/r_plane.c 1844
+ */
+  else if (dopo_gl && !r_in_skybox)
+    plane_pass_skip_sky = 1;
+/* @endpatch */
+
+/** @patch src/r_plane.c 1853 */
+  if (!span_recording)
+    plane_pass_skip_sky = 0;
+/* @endpatch */
+
+/**
  * @brief The fuzz goes through dopo_gl_fuzz16, which knows the keys.
  *
  * @patch src/r_draw.c 74
