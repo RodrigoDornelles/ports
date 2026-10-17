@@ -50,6 +50,7 @@
 #include "w_wad.h"
 #include "prboomtv/render_gl.h"
 #include "prboomtv/shaders.h"
+#include "prboomtv/widescreen.h"
 
 /* r_data.c, killough's marker lumps of the extra colormaps */
 extern int firstcolormaplump;
@@ -155,6 +156,7 @@ typedef unsigned int  GLbitfield;
 #define GL_FLOAT                  0x1406
 #define GL_RGB                    0x1907
 #define GL_LUMINANCE              0x1909
+#define GL_LUMINANCE_ALPHA        0x190A
 #define GL_UNSIGNED_SHORT_5_6_5   0x8363
 #define GL_TEXTURE_2D             0x0DE1
 #define GL_TEXTURE0               0x84C0
@@ -363,6 +365,12 @@ static struct
 static uint8_t         zlight_rows[32 * MAXLIGHTZ];
 static dbool           zlight_valid = FALSE;
 
+/* the 2D of this frame goes to the GPU (see "2D" below) */
+static dbool                gl2d_on = FALSE;
+static int                  gl2d_suspended = 0;
+static const unsigned char *gl2d_frame = NULL;  /* screens[0] when it began */
+static glquads_t            two_q;              /* fuzz[]: 0 patch, 1 image */
+
 /* the sprite or masked texture whose posts go to the GPU, NULL while the
  * CPU draws them */
 static gltex_t        *masked_tex = NULL;
@@ -430,6 +438,10 @@ static int             cmap_lumprows[64];
 /* programs and buffers */
 static GLuint          wall_program = 0, frame_program = 0, plane_program = 0;
 static GLuint          fuzz_program = 0;
+static GLuint          two_program = 0, copy_program = 0;
+static GLint           two_u_scale, two_u_offset, two_u_tex, two_u_trans, two_u_pal;
+static GLint           copy_u_scale, copy_u_offset, copy_u_tex;
+static GLuint          two_vbo = 0, pal_tex = 0, trans_tex = 0, ramp_tex = 0;
 static GLint           fuzz_u_scale, fuzz_u_offset, fuzz_u_tex, fuzz_u_cmap;
 static GLint           fuzz_u_mul, fuzz_u_add;
 static GLint           wall_u_scale, wall_u_offset, wall_u_tex, wall_u_cmap;
@@ -452,6 +464,7 @@ static long            stat_quads, stat_columns, stat_software, stat_draws;
 static long            stat_spans, stat_spans_software;
 static long            stat_masked, stat_masked_software, stat_posts;
 static long            stat_rows, stat_pixels, stat_full_fills, stat_planes;
+static long            stat_2d_quads, stat_mirror_pixels;
 static double          stat_scan_ms;
 static int             stat_frames;
 
@@ -582,6 +595,10 @@ static void gl_texture_params(GLint wrap)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
 }
 
+static void gl2d_forget(void);
+static void gl2d_context(void);
+static void gl2d_destroy(void);
+
 /* ---- context ---- */
 
 /* every GL name died with the context; nothing is deleted */
@@ -597,6 +614,9 @@ static void gl_forget_objects(void)
    cmap_tex = 0;
    cmap_palette = NULL;
    wall_program = frame_program = plane_program = fuzz_program = 0;
+   two_program = copy_program = 0;
+   two_vbo = pal_tex = trans_tex = ramp_tex = 0;
+   gl2d_forget();
    plane_vbo = zlight_tex = 0;
    zlight_valid = FALSE;
    vbo = ibo = frame_vbo = 0;
@@ -636,6 +656,20 @@ static void gl_context_reset(void)
       static const char *const plane_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb" };
       plane_program = gl_program(GL_SHADER(vert_plane), GL_SHADER(frag_plane), plane_attribs, 5);
       fuzz_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_fuzz), wall_attribs, 3);
+      two_program  = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_2d), wall_attribs, 3);
+      copy_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_copy), wall_attribs, 3);
+      if (!two_program || !copy_program)
+         return;
+      two_u_scale   = glGetUniformLocation(two_program, "u_scale");
+      two_u_offset  = glGetUniformLocation(two_program, "u_offset");
+      two_u_tex     = glGetUniformLocation(two_program, "u_tex");
+      two_u_trans   = glGetUniformLocation(two_program, "u_trans");
+      two_u_pal     = glGetUniformLocation(two_program, "u_pal");
+      copy_u_scale  = glGetUniformLocation(copy_program, "u_scale");
+      copy_u_offset = glGetUniformLocation(copy_program, "u_offset");
+      copy_u_tex    = glGetUniformLocation(copy_program, "u_tex");
+      glGenBuffers(1, &two_vbo);
+      gl2d_context();
       if (!plane_program || !fuzz_program)
          return;
       fuzz_u_scale  = glGetUniformLocation(fuzz_program, "u_scale");
@@ -705,6 +739,10 @@ static void gl_context_destroy(void)
       glDeleteProgram(frame_program);
       glDeleteProgram(plane_program);
       glDeleteProgram(fuzz_program);
+      glDeleteProgram(two_program);
+      glDeleteProgram(copy_program);
+      glDeleteBuffers(1, &two_vbo);
+      gl2d_destroy();
       glDeleteBuffers(1, &plane_vbo);
       glDeleteTextures(1, &zlight_tex);
    }
@@ -1022,7 +1060,8 @@ dbool dopo_gl_statusbar_refresh(void)
    dbool refresh;
    int i;
 
-   if (!dopo_gl)
+   /* with the 2D on the GPU nothing stays from a frame to the next */
+   if (!dopo_gl || gl2d_on)
       return TRUE;
    for (i = 0; i < 256; i++)
       palette[i] = V_Palette16[i * VID_NUMCOLORWEIGHTS + (VID_NUMCOLORWEIGHTS - 1)];
@@ -1141,8 +1180,11 @@ dbool dopo_gl_walls_begin(void)
     * instead touched a new cache line per pixel: 15 ms a frame at 1080p
     * on the ARM. */
    frame_has_view = TRUE;
-   if (!view_keyed || keyed_key != dopo_gl_keys[0] || keyed_topleft != view_topleft
-         || keyed_w != viewwidth || keyed_h != viewheight)
+   /* with the 2D on the GPU the whole frame is already keyed
+    * (dopo_gl_frame_begin) */
+   if (!gl2d_on && (!view_keyed || keyed_key != dopo_gl_keys[0]
+         || keyed_topleft != view_topleft
+         || keyed_w != viewwidth || keyed_h != viewheight))
    {
       const uint16_t key = dopo_gl_keys[0];
       int y, x;
@@ -1814,6 +1856,475 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
    return TRUE;
 }
 
+/* ---- 2D ----
+ *
+ * The status bar, the HUD, menus, text and full-screen pages, drawn by the
+ * GPU in the order the CPU asks for them, over the 3D view: a patch is one
+ * quad (its transparent texels discarded), a filled rectangle a quad of
+ * one colour, and an image the CPU made (a cached page, a background, the
+ * status bar's back screen) a copy of a texture that mirrors it, sent
+ * again only when the CPU changes it. Nothing is left in the software
+ * frame, which then stays all key; what the CPU still draws there (the
+ * automap, ACS screens) shows through it as before. Not with the 4:3 game
+ * in its 16:9 frame (the frame is another buffer), where the CPU draws the
+ * 2D as before. */
+
+static uint16_t             pal_row[256];
+static dbool                pal_valid = FALSE;
+
+/* colour translations: rows of trans_tex, row 0 the identity */
+#define GL2D_TRANS 64
+static const uint8_t       *trans_keys[GL2D_TRANS];
+static int                  trans_n = 0;
+
+/* patches with their coverage, by their rpatch_t (patches and composites
+ * live in arrays that do not move while a set of wads is loaded) */
+#define GL2D_PATCHES 4096
+static struct
+{
+   const rpatch_t *key;
+   gltex_t         tex;
+} gl2d_patches[GL2D_PATCHES];
+static lumpinfo_t          *gl2d_patches_owner = NULL;
+
+/* textures mirroring CPU images */
+#define GL2D_MIRRORS 16
+static struct
+{
+   const void *key;
+   GLuint      id;
+   int         w, h;
+   dbool       dirty;
+   unsigned    used;
+} gl2d_mirrors[GL2D_MIRRORS];
+static unsigned             gl2d_clock = 0;
+
+static void gl_draw_range(GLuint tex, int first, int count);
+
+static void gl2d_forget(void)
+{
+   int i;
+   for (i = 0; i < GL2D_PATCHES; i++)
+      gl2d_patches[i].tex.id = 0;
+   for (i = 0; i < GL2D_MIRRORS; i++)
+   {
+      gl2d_mirrors[i].id = 0;
+      gl2d_mirrors[i].key = NULL;
+   }
+   trans_n = 0;
+   pal_valid = FALSE;
+}
+
+static void gl2d_destroy(void)
+{
+   int i;
+   for (i = 0; i < GL2D_PATCHES; i++)
+      if (gl2d_patches[i].tex.id)
+         glDeleteTextures(1, &gl2d_patches[i].tex.id);
+   for (i = 0; i < GL2D_MIRRORS; i++)
+      if (gl2d_mirrors[i].id)
+         glDeleteTextures(1, &gl2d_mirrors[i].id);
+   glDeleteTextures(1, &pal_tex);
+   glDeleteTextures(1, &trans_tex);
+   glDeleteTextures(1, &ramp_tex);
+}
+
+/* the palette, the translation table and the ramp a filled rectangle
+ * samples its one colour from */
+static void gl2d_context(void)
+{
+   uint8_t ramp[256 * 2];
+   int i;
+
+   gl2d_forget();
+   glGenTextures(1, &pal_tex);
+   glGenTextures(1, &trans_tex);
+   glGenTextures(1, &ramp_tex);
+   for (i = 0; i < 256; i++)
+   {
+      ramp[i * 2] = (uint8_t)i;
+      ramp[i * 2 + 1] = 255;
+   }
+   glBindTexture(GL_TEXTURE_2D, ramp_tex);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, 256, 1, 0,
+                GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, ramp);
+   glBindTexture(GL_TEXTURE_2D, trans_tex);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 256, GL2D_TRANS, 0,
+                GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
+   {
+      uint8_t identity[256];
+      for (i = 0; i < 256; i++)
+         identity[i] = (uint8_t)i;
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_LUMINANCE, GL_UNSIGNED_BYTE, identity);
+   }
+   trans_n = 1;
+   trans_keys[0] = NULL;
+}
+
+void dopo_gl_frame_begin(void)
+{
+   gl2d_on = FALSE;
+   gl2d_frame = screens[0].data;
+   two_q.n = 0;
+   if (!dopo_gl || !gl_ready || VID_TRUECOLOR || !dopo_widescreen || !screens[0].data)
+      return;
+   gl2d_on = TRUE;
+   gl_texcache_check();
+   gl_colormap_update();
+   if (gl2d_patches_owner != lumpinfo)
+   {
+      int i;
+      for (i = 0; i < GL2D_PATCHES; i++)
+      {
+         if (gl2d_patches[i].tex.id)
+            glDeleteTextures(1, &gl2d_patches[i].tex.id);
+         gl2d_patches[i].key = NULL;
+         memset(&gl2d_patches[i].tex, 0, sizeof(gltex_t));
+      }
+      gl2d_patches_owner = lumpinfo;
+   }
+
+   /* the whole frame keyed: everything the CPU no longer draws */
+   if (!view_keyed || keyed_key != dopo_gl_keys[0]
+         || keyed_topleft != (uint16_t *)screens[0].data || keyed_x0 || keyed_y0
+         || keyed_w != SCREENWIDTH || keyed_h != SCREENHEIGHT)
+   {
+      const uint16_t key = dopo_gl_keys[0];
+      uint16_t *p = (uint16_t *)screens[0].data;
+      size_t i;
+      const size_t n = (size_t)SCREENWIDTH * SCREENHEIGHT;
+      view_keyed    = TRUE;
+      keyed_key     = key;
+      keyed_topleft = p;
+      keyed_x0      = keyed_y0 = 0;
+      keyed_w       = SCREENWIDTH;
+      keyed_h       = SCREENHEIGHT;
+      stat_full_fills++;
+      if ((key >> 8) == (key & 0xff))
+         memset(p, key & 0xff, n * 2);
+      else
+         for (i = 0; i < n; i++)
+            p[i] = key;
+   }
+   frame_has_view = TRUE;
+}
+
+void dopo_gl_2d_suspend(dbool suspend)
+{
+   gl2d_suspended += suspend ? 1 : -1;
+}
+
+/* a draw on screen 0, the frame being built, that the GPU takes */
+static dbool gl2d_target(int scrn)
+{
+   return gl2d_on && !gl2d_suspended && scrn == 0 && screens[0].data == gl2d_frame;
+}
+
+/* the row of a colour translation, 0 when none or no room */
+static int gl2d_trans(const uint8_t *trans)
+{
+   int i;
+   if (!trans)
+      return 0;
+   for (i = 1; i < trans_n; i++)
+      if (trans_keys[i] == trans)
+         return i;
+   if (trans_n == GL2D_TRANS)
+      return -1;
+   glBindTexture(GL_TEXTURE_2D, trans_tex);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, trans_n, 256, 1, GL_LUMINANCE, GL_UNSIGNED_BYTE, trans);
+   trans_keys[trans_n] = trans;
+   return trans_n++;
+}
+
+/* a patch with its coverage: index and alpha, column x along GL row x */
+static gltex_t *gl2d_patch(const rpatch_t *p)
+{
+   unsigned h = (unsigned)(((uintptr_t)p >> 4) * 2654435761u) % GL2D_PATCHES;
+   int probes;
+   gltex_t *t;
+   uint8_t *buf;
+   int rows, cols, x, i;
+
+   for (probes = 0; probes < GL2D_PATCHES; probes++, h = (h + 1) % GL2D_PATCHES)
+      if (gl2d_patches[h].key == p || !gl2d_patches[h].key)
+         break;
+   if (probes == GL2D_PATCHES)
+      return NULL;
+   t = &gl2d_patches[h].tex;
+   if (gl2d_patches[h].key == p)
+      return t->bad ? NULL : t;
+   gl2d_patches[h].key = p;
+   memset(t, 0, sizeof(*t));
+   rows = gl_pot(p->height);
+   cols = gl_pot(p->width);
+   if (rows > max_texture_size || cols > max_texture_size
+         || (buf = (uint8_t *)calloc((size_t)rows * cols, 2)) == NULL)
+   {
+      t->bad = TRUE;
+      return NULL;
+   }
+   for (x = 0; x < p->width; x++)
+   {
+      const rcolumn_t *column = &p->columns[x];
+      for (i = 0; i < column->numPosts; i++)
+      {
+         const rpost_t *post = &column->posts[i];
+         int y;
+         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
+         {
+            uint8_t *d = buf + ((size_t)x * rows + y) * 2;
+            d[0] = column->pixels[y];
+            d[1] = 255;
+         }
+      }
+   }
+   glGenTextures(1, &t->id);
+   glBindTexture(GL_TEXTURE_2D, t->id);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, rows, cols, 0,
+                GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, buf);
+   free(buf);
+   t->gl_width  = rows;
+   t->gl_height = cols;
+   return t;
+}
+
+/* corners top left, top right, bottom right, bottom left */
+static dbool gl2d_quad(gltex_t *tex, uint8_t kind, int x0, int y0, int x1, int y1,
+                       const float st[4][2], int trans_row)
+{
+   glvert_t *q;
+   int i;
+   if (x0 >= x1 || y0 >= y1 || (q = gl_quad_in(&two_q, tex)) == NULL)
+      return FALSE;
+   q[0].x = q[3].x = (int16_t)x0;
+   q[1].x = q[2].x = (int16_t)x1;
+   q[0].y = q[1].y = (int16_t)y0;
+   q[2].y = q[3].y = (int16_t)y1;
+   for (i = 0; i < 4; i++)
+   {
+      q[i].s = st[i][0];
+      q[i].t = st[i][1];
+      q[i].l = (uint16_t)(((trans_row + 0.5) / GL2D_TRANS) * 65535.0 + 0.5);
+   }
+   two_q.fuzz[two_q.n - 1] = kind;
+   return TRUE;
+}
+
+/* V_DrawMemPatch: pixel x of the patch's screen rectangle samples column
+ * (x - left) * dxi (16.16, mirrored when flipped), row y samples row
+ * (y - top) * dyi; the corners carry them half a pixel outside, so the GPU
+ * gets them back at each pixel's centre */
+dbool dopo_gl_2d_patch(const rpatch_t *patch, int left, int top, int right, int bottom,
+                       int dxi, int dyi, dbool flip, const uint8_t *trans)
+{
+   gltex_t *t;
+   double u0, u1, v0, v1;
+   float st[4][2];
+   int row;
+
+   if (!gl2d_target(0) || !patch || patch->width <= 0 || patch->height <= 0)
+      return FALSE;
+   row = gl2d_trans(trans);
+   if (row < 0 || (t = gl2d_patch(patch)) == NULL)
+      return FALSE;
+   u0 = -0.5 * dxi / 65536.0;
+   u1 = (right - left - 0.5) * dxi / 65536.0;
+   v0 = -0.5 * dyi / 65536.0;
+   v1 = (bottom - top - 0.5) * dyi / 65536.0;
+   if (flip)
+   {
+      u0 = patch->width - u0;
+      u1 = patch->width - u1;
+   }
+   /* s runs down a column (GL width = rows), t across the columns */
+   st[0][0] = st[1][0] = (float)(v0 / t->gl_width);
+   st[2][0] = st[3][0] = (float)(v1 / t->gl_width);
+   st[0][1] = st[3][1] = (float)(u0 / t->gl_height);
+   st[1][1] = st[2][1] = (float)(u1 / t->gl_height);
+   gl2d_quad(t, 0, left, top, right, bottom, (const float (*)[2])st, row);
+   return TRUE;
+}
+
+/* V_FillRect: one colour, from the ramp */
+dbool dopo_gl_2d_fill(int x, int y, int width, int height, int colour)
+{
+   static gltex_t ramp;
+   float st[4][2];
+   int i;
+
+   if (!gl2d_target(0))
+      return FALSE;
+   ramp.id = ramp_tex;
+   for (i = 0; i < 4; i++)
+   {
+      st[i][0] = (colour + 0.5f) / 256.0f;
+      st[i][1] = 0.5f;
+   }
+   gl2d_quad(&ramp, 0, x, y, x + width, y + height, (const float (*)[2])st, 0);
+   return TRUE;
+}
+
+static int gl2d_mirror(const void *key, int w, int h)
+{
+   int i, oldest = 0;
+   for (i = 0; i < GL2D_MIRRORS; i++)
+      if (gl2d_mirrors[i].key == key && gl2d_mirrors[i].w == w && gl2d_mirrors[i].h == h)
+      {
+         gl2d_mirrors[i].used = ++gl2d_clock;
+         return i;
+      }
+   for (i = 1; i < GL2D_MIRRORS; i++)
+      if (gl2d_mirrors[i].used < gl2d_mirrors[oldest].used)
+         oldest = i;
+   if (!gl2d_mirrors[oldest].id)
+      glGenTextures(1, &gl2d_mirrors[oldest].id);
+   glBindTexture(GL_TEXTURE_2D, gl2d_mirrors[oldest].id);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, NULL);
+   gl2d_mirrors[oldest].key   = key;
+   gl2d_mirrors[oldest].w     = w;
+   gl2d_mirrors[oldest].h     = h;
+   gl2d_mirrors[oldest].dirty = TRUE;
+   gl2d_mirrors[oldest].used  = ++gl2d_clock;
+   return oldest;
+}
+
+void dopo_gl_2d_image_dirty(const void *key)
+{
+   int i;
+   for (i = 0; i < GL2D_MIRRORS; i++)
+      if (gl2d_mirrors[i].key == key)
+         gl2d_mirrors[i].dirty = TRUE;
+}
+
+void dopo_gl_2d_screen_dirty(int scrn)
+{
+   if (dopo_gl && scrn > 0 && scrn < NUM_SCREENS && screens[scrn].data)
+      dopo_gl_2d_image_dirty(screens[scrn].data);
+}
+
+/* Part (sx, sy, w, h) of a w_img x h_img RGB565 image the CPU made, to
+ * (dx, dy) on screen 0; the image is sent only when it changed. */
+dbool dopo_gl_2d_image(const void *image, int w_img, int h_img,
+                       int sx, int sy, int w, int h, int dx, int dy)
+{
+   /* a texture holder per mirror: runs of copies compare holders */
+   static gltex_t holders[GL2D_MIRRORS];
+   float st[4][2];
+   int m;
+
+   if (!gl2d_target(0) || !image || w_img <= 0 || h_img <= 0
+         || w_img > max_texture_size || h_img > max_texture_size)
+      return FALSE;
+   m = gl2d_mirror(image, w_img, h_img);
+   if (gl2d_mirrors[m].dirty)
+   {
+      glBindTexture(GL_TEXTURE_2D, gl2d_mirrors[m].id);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w_img, h_img, GL_RGB,
+                      GL_UNSIGNED_SHORT_5_6_5, image);
+      gl2d_mirrors[m].dirty = FALSE;
+      stat_mirror_pixels += (long)w_img * h_img;
+   }
+   holders[m].id = gl2d_mirrors[m].id;
+   st[0][0] = st[3][0] = (float)sx / w_img;
+   st[1][0] = st[2][0] = (float)(sx + w) / w_img;
+   st[0][1] = st[1][1] = (float)sy / h_img;
+   st[2][1] = st[3][1] = (float)(sy + h) / h_img;
+   gl2d_quad(&holders[m], 1, dx, dy, dx + w, dy + h, (const float (*)[2])st, 0);
+   return TRUE;
+}
+
+dbool dopo_gl_2d_image_full(const void *image)
+{
+   return dopo_gl_2d_image(image, SCREENWIDTH, SCREENHEIGHT, 0, 0,
+                           SCREENWIDTH, SCREENHEIGHT, 0, 0);
+}
+
+/* V_CopyRect from a back screen to screen 0 */
+dbool dopo_gl_2d_copy(int srcscrn, int sx, int sy, int w, int h, int dx, int dy)
+{
+   int sh;
+   if (srcscrn <= 0 || srcscrn >= NUM_SCREENS || !screens[srcscrn].data)
+      return FALSE;
+   sh = screens[srcscrn].height > 0 ? screens[srcscrn].height : SCREENHEIGHT;
+   if (sx < 0 || sy < 0 || sx + w > SCREENWIDTH || sy + h > sh)
+      return FALSE;
+   return dopo_gl_2d_image(screens[srcscrn].data, SCREENWIDTH, sh, sx, sy, w, h, dx, dy);
+}
+
+static void gl2d_palette(void)
+{
+   uint16_t row[256];
+   int i;
+   for (i = 0; i < 256; i++)
+      row[i] = V_Palette16[i * VID_NUMCOLORWEIGHTS + (VID_NUMCOLORWEIGHTS - 1)];
+   if (pal_valid && !memcmp(row, pal_row, sizeof(row)))
+      return;
+   memcpy(pal_row, row, sizeof(row));
+   glBindTexture(GL_TEXTURE_2D, pal_tex);
+   gl_texture_params(GL_CLAMP_TO_EDGE);
+   glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 1, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, row);
+   pal_valid = TRUE;
+}
+
+/* the 2D in the order it came, one draw per run of the same texture */
+static void gl_draw_2d(unsigned width, unsigned height)
+{
+   int i;
+
+   if (!two_q.n)
+      return;
+   gl2d_palette();
+   glBindBuffer(GL_ARRAY_BUFFER, two_vbo);
+   glBufferData(GL_ARRAY_BUFFER, sizeof(glvert_t) * 4 * two_q.n, two_q.v, GL_STREAM_DRAW);
+   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+   glEnableVertexAttribArray(0);
+   glEnableVertexAttribArray(1);
+   glEnableVertexAttribArray(2);
+   glActiveTexture(GL_TEXTURE0 + 1);
+   glBindTexture(GL_TEXTURE_2D, trans_tex);
+   glActiveTexture(GL_TEXTURE0 + 2);
+   glBindTexture(GL_TEXTURE_2D, pal_tex);
+   glActiveTexture(GL_TEXTURE0);
+   for (i = 0; i < two_q.n; )
+   {
+      int j = i + 1;
+      while (j < two_q.n && two_q.tex[j] == two_q.tex[i] && two_q.fuzz[j] == two_q.fuzz[i])
+         j++;
+      if (two_q.fuzz[i])
+      {
+         glUseProgram(copy_program);
+         glUniform2f(copy_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(copy_u_offset, 0, 0);
+         glUniform1i(copy_u_tex, 0);
+      }
+      else
+      {
+         glUseProgram(two_program);
+         glUniform2f(two_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(two_u_offset, 0, 0);
+         glUniform1i(two_u_tex, 0);
+         glUniform1i(two_u_trans, 1);
+         glUniform1i(two_u_pal, 2);
+      }
+      gl_draw_range(two_q.tex[i]->id, i, j - i);
+      i = j;
+   }
+   glDisableVertexAttribArray(1);
+   glDisableVertexAttribArray(2);
+   stat_2d_quads += two_q.n;
+   two_q.n = 0;
+}
+
 /* ---- presenting ---- */
 
 /* the solid quads grouped per texture (in the order the textures first
@@ -2282,7 +2793,8 @@ static void gl_stats(void)
            "(setup %.2f, key %.2f, columns %.2f) | present %.2f ms "
            "(rows %.2f, %ld rows / %ld kpixels sent; %ld full key fills in the period) | "
            "%ld quads, %ld draws, %ld posts | software: %ld of %ld columns, "
-           "%ld of %ld spans, %ld of %ld sprites/masked | %ld plane quads\n",
+           "%ld of %ld spans, %ld of %ld sprites/masked | %ld plane quads | "
+           "2D: %ld quads, %ld kpixels of images sent\n",
            stat_frame_ms > 0 ? 1000.0 * stat_frames / stat_frame_ms : 0.0,
            stat_frame_ms / stat_frames, stat_walls_ms / stat_frames,
            stat_setup_ms / stat_frames, stat_fill_ms / stat_frames,
@@ -2294,13 +2806,15 @@ static void gl_stats(void)
            stat_software / stat_frames,
            stat_columns / stat_frames, stat_spans_software / stat_frames,
            stat_spans / stat_frames, stat_masked_software / stat_frames,
-           stat_masked / stat_frames, stat_planes / stat_frames);
+           stat_masked / stat_frames, stat_planes / stat_frames,
+           stat_2d_quads / stat_frames, stat_mirror_pixels / stat_frames / 1000);
    stat_walls_ms = stat_setup_ms = stat_fill_ms = stat_present_ms = 0;
    stat_frame_ms = 0;
    stat_quads = stat_columns = stat_software = stat_draws = 0;
    stat_spans = stat_spans_software = 0;
    stat_masked = stat_masked_software = stat_posts = 0;
    stat_rows = stat_pixels = stat_full_fills = stat_planes = 0;
+   stat_2d_quads = stat_mirror_pixels = 0;
    stat_scan_ms = 0;
    stat_frames = 0;
 }
@@ -2331,7 +2845,7 @@ void dopo_gl_present(retro_video_refresh_t video_cb, const void *frame,
 
    if (!gl_ready || !hw.get_current_framebuffer)
    {
-      solid_q.n = masked_q.n = plane_n = 0;
+      solid_q.n = masked_q.n = plane_n = two_q.n = 0;
       plane_run.on = FALSE;
       view_active = view_software = frame_has_view = view_keyed = FALSE;
       video_cb(NULL, width, height, 0);
@@ -2361,6 +2875,9 @@ void dopo_gl_present(retro_video_refresh_t video_cb, const void *frame,
       stat_scan_ms += gl_now_ms() - ts;
       gl_draw_frame(frame, width, height, pitch, view_top, view_bottom);
    }
+   if (gl2d_on)
+      gl_draw_2d(width, height);
+   two_q.n = 0;
    gl_frame_rekey((void *)frame, pitch);
    dirty_rects.n = 0;
    frame_has_view = FALSE;

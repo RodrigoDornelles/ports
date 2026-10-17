@@ -198,6 +198,19 @@ Etapa 2 em andamento (2026-10-16):
 - Harness: SHOT_SYNC=flush (sem glFinish, como o frontend) mede o regime
   real. ARM 1080p antes de 2+3: gl 28 fps (35.5 ms) contra 20 do software;
   o present (envio de linhas + vertices) era o maior pedaco.
+Etapa 3 (2D na GPU), primeira versao (2026-10-17): cada desenho na tela 0
+e oferecido a GPU (enhancements/gpu/gl.c, "2D"), na ordem em que a CPU
+pede, por cima do 3D: patch = um quad (textura indice+cobertura,
+transparente descartado; traducao de cor numa tabela; paleta da hora do
+present), V_FillRect = quad de uma cor, e imagens prontas da CPU (paginas
+e fundos em cache, a tela de fundo da status bar, as bordas do
+widescreen) = copia de uma textura espelho, reenviada so quando a CPU a
+muda. O quadro software fica todo chave (cheio uma vez); o que a CPU
+ainda desenha nele (automap, ACS) aparece pelo caminho de antes. Sem
+quadro congelado em gl (o d_main copiava a tela 0). Fica fora no 4:3
+dentro do quadro 16:9 (outro buffer). x86 1080p: titulo ~360 -> ~6200
+fps; no jogo, nenhuma linha do quadro software enviada. Melt removida de
+vez (patchs/wipe_remove.c).
 Pendente na transicao: translucidez do Boom sobre parede (mistura com a
 chave), tint de luz dinamica gravado como RMW, R_TintView (agua de 3D
 floor), wipe (le a chave: a melt mostra preto onde ha parede).

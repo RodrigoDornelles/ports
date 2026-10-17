@@ -151,6 +151,43 @@ void dopo_gl_dirty(int y0, int y1);
 /** @brief Pixels [x0, x1) of rows [y0, y1) were drawn on (as above). */
 void dopo_gl_dirty_rect(int x0, int y0, int x1, int y1);
 
+/**
+ * @brief The 2D on the GPU (enhancements/gpu/gl.c, "2D"): D_Display calls
+ * dopo_gl_frame_begin before drawing anything; the 2D drawing then offers
+ * each draw on screen 0 to the GPU, which takes it (True) or leaves it to
+ * the CPU.
+ */
+void dopo_gl_frame_begin(void);
+
+/** @brief While suspended (nested), the CPU draws the 2D: a cache being
+ * built from what lands in screen 0. */
+void dopo_gl_2d_suspend(dbool suspend);
+
+/** @brief V_DrawMemPatch's patch over its screen rectangle. */
+dbool dopo_gl_2d_patch(const rpatch_t *patch, int left, int top, int right, int bottom,
+                       int dxi, int dyi, dbool flip, const uint8_t *trans);
+
+/** @brief V_FillRect. */
+dbool dopo_gl_2d_fill(int x, int y, int width, int height, int colour);
+
+/** @brief Part (sx, sy, w, h) of a w_img x h_img RGB565 image the CPU made
+ * (a cache), to (dx, dy) on screen 0; sent again only after
+ * dopo_gl_2d_image_dirty. */
+dbool dopo_gl_2d_image(const void *image, int w_img, int h_img,
+                       int sx, int sy, int w, int h, int dx, int dy);
+
+/** @brief A whole-screen image (a cached page or background). */
+dbool dopo_gl_2d_image_full(const void *image);
+
+/** @brief The CPU changed that image. */
+void dopo_gl_2d_image_dirty(const void *image);
+
+/** @brief The CPU drew on back screen scrn (its mirror is sent again). */
+void dopo_gl_2d_screen_dirty(int scrn);
+
+/** @brief V_CopyRect from back screen srcscrn to screen 0. */
+dbool dopo_gl_2d_copy(int srcscrn, int sx, int sy, int w, int h, int dx, int dy);
+
 /** @brief Whether the status bar redraws whole this frame (d_main.c). */
 dbool dopo_gl_statusbar_refresh(void);
 

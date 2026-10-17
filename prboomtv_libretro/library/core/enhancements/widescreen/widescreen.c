@@ -223,7 +223,19 @@ void dopo_fill_wings(int scrn, int y, int src_y, int h)
       wings_height  = SCREENHEIGHT;
       wings_depth   = depth;
       wings_palette = V_Palette16;
+      dopo_gl_2d_image_dirty(wings);
    }
+
+   /* in gl, the two sides as GPU images of the same rows */
+   if (scrn == 0 && src_y >= 0 && src_y + h <= SCREENHEIGHT
+         && dopo_gl_2d_image(wings, SCREENWIDTH, SCREENHEIGHT, 0, src_y, offset, h, 0, y)
+         && dopo_gl_2d_image(wings, SCREENWIDTH, SCREENHEIGHT, right, src_y,
+                             SCREENWIDTH - right, h, right, y))
+      return;
+   if (scrn == 0)
+      dopo_gl_dirty_rect(0, y, SCREENWIDTH, y + h);
+   else
+      dopo_gl_2d_screen_dirty(scrn);
 
    for (row = 0; row < h; row++)
    {
