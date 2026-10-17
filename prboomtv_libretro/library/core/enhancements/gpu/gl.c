@@ -50,6 +50,7 @@
 #include "w_wad.h"
 #include "prboomtv/render_gl.h"
 #include "prboomtv/scale2x.h"
+#include "prboomtv/glow.h"
 #include "prboomtv/shaders.h"
 #include "prboomtv/widescreen.h"
 
@@ -170,6 +171,7 @@ typedef unsigned int  GLbitfield;
 #define GL_TEXTURE_WRAP_S         0x2802
 #define GL_TEXTURE_WRAP_T         0x2803
 #define GL_NEAREST                0x2600
+#define GL_LINEAR                 0x2601
 #define GL_REPEAT                 0x2901
 #define GL_CLAMP_TO_EDGE          0x812F
 #define GL_ARRAY_BUFFER           0x8892
@@ -289,6 +291,8 @@ typedef struct
    const rpatch_t *patch;
    dbool          bad;                  /* too big for the GPU */
    dbool          alpha;                /* index and coverage, prboom-scale */
+   dbool          glow_valid;           /* glow_rgb is known */
+   uint32_t       glow_rgb;             /* a sprite's corona colour */
    int            count, first;         /* quads this frame, while sorting */
 } gltex_t;
 
@@ -307,7 +311,8 @@ typedef struct
 {
    glvert_t *v;
    gltex_t **tex;
-   uint8_t  *fuzz;   /* a post of a fuzzy thing (prboom-spectre) */
+   uint8_t  *fuzz;   /* how it blends: GL_KIND_* */
+   uint32_t *rgb;    /* a corona's colour, 0xRRGGBB */
    int       n, cap;
 } glquads_t;
 
@@ -383,6 +388,25 @@ static glquads_t            two_q;              /* fuzz[]: 0 patch, 1 image */
 static gltex_t        *masked_tex = NULL;
 static const rpatch_t *masked_patch = NULL;
 static dbool           masked_fuzz = FALSE;
+static uint8_t         masked_kind = 0;     /* GL_KIND_* of its quads */
+
+/* how a masked quad blends: a fuzzy thing's look (prboom-spectre), a
+ * translucent or additive one (DECORATE RenderStyle, prboom-glow) at
+ * alpha 0..32, a corona (prboom-glow 2) */
+#define GL_KIND_PLAIN   0
+#define GL_KIND_FUZZ    1
+#define GL_KIND_ADD     2     /* + alpha: 2..34 */
+#define GL_KIND_LERP    35    /* + alpha: 35..67 */
+#define GL_KIND_CORONA  255
+
+/* the corona of the additive sprite being drawn, queued after its posts */
+static struct
+{
+   dbool    on;
+   int      x0, y0, x1, y1;   /* view pixels, unclipped */
+   uint32_t rgb;
+} masked_corona;
+static gltex_t         corona_tex;          /* a radial ramp, 64x64 */
 
 /* The view of the software frame stays filled with the key between
  * frames: only the rows something drew on (the HUD, a menu, what the GPU
@@ -444,7 +468,8 @@ static int             cmap_lumprows[64];
 
 /* programs and buffers */
 static GLuint          wall_program = 0, frame_program = 0, plane_program = 0;
-static GLuint          fuzz_program = 0, sprite_program = 0;
+static GLuint          fuzz_program = 0, sprite_program = 0, corona_program = 0;
+static GLint           corona_u_scale, corona_u_offset, corona_u_tex, corona_u_color;
 static GLint           sprite_u_scale, sprite_u_offset, sprite_u_tex, sprite_u_cmap;
 static GLuint          two_program = 0, copy_program = 0;
 static GLint           two_u_scale, two_u_offset, two_u_tex, two_u_trans, two_u_pal;
@@ -622,6 +647,8 @@ static void gl_forget_objects(void)
    cmap_tex = 0;
    cmap_palette = NULL;
    wall_program = frame_program = plane_program = fuzz_program = sprite_program = 0;
+   corona_program = 0;
+   corona_tex.id = 0;
    two_program = copy_program = 0;
    two_vbo = pal_tex = trans_tex = ramp_tex = 0;
    gl2d_forget();
@@ -665,6 +692,7 @@ static void gl_context_reset(void)
       plane_program = gl_program(GL_SHADER(vert_plane), GL_SHADER(frag_plane), plane_attribs, 5);
       fuzz_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_fuzz), wall_attribs, 3);
       sprite_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite), wall_attribs, 3);
+      corona_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_corona), wall_attribs, 3);
       two_program  = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_2d), wall_attribs, 3);
       copy_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_copy), wall_attribs, 3);
       if (!two_program || !copy_program)
@@ -679,8 +707,36 @@ static void gl_context_reset(void)
       copy_u_tex    = glGetUniformLocation(copy_program, "u_tex");
       glGenBuffers(1, &two_vbo);
       gl2d_context();
-      if (!plane_program || !fuzz_program || !sprite_program)
+      if (!plane_program || !fuzz_program || !sprite_program || !corona_program)
          return;
+      corona_u_scale  = glGetUniformLocation(corona_program, "u_scale");
+      corona_u_offset = glGetUniformLocation(corona_program, "u_offset");
+      corona_u_tex    = glGetUniformLocation(corona_program, "u_tex");
+      corona_u_color  = glGetUniformLocation(corona_program, "u_color");
+      {
+         /* the corona's ramp: 1 in the middle to 0 at the rim, falling
+          * off as the square, so it has no edge */
+         uint8_t ramp[64 * 64];
+         int x, y;
+         for (y = 0; y < 64; y++)
+            for (x = 0; x < 64; x++)
+            {
+               const double dx = (x + 0.5) / 32.0 - 1.0, dy = (y + 0.5) / 32.0 - 1.0;
+               double v = 1.0 - sqrt(dx * dx + dy * dy);
+               v = v > 0 ? v * v : 0;
+               ramp[y * 64 + x] = (uint8_t)(v * 255.0 + 0.5);
+            }
+         glGenTextures(1, &corona_tex.id);
+         glBindTexture(GL_TEXTURE_2D, corona_tex.id);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+         glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 64, 64, 0,
+                      GL_LUMINANCE, GL_UNSIGNED_BYTE, ramp);
+         corona_tex.gl_width = corona_tex.gl_height = 64;
+      }
       sprite_u_scale  = glGetUniformLocation(sprite_program, "u_scale");
       sprite_u_offset = glGetUniformLocation(sprite_program, "u_offset");
       sprite_u_tex    = glGetUniformLocation(sprite_program, "u_tex");
@@ -753,6 +809,8 @@ static void gl_context_destroy(void)
       glDeleteProgram(plane_program);
       glDeleteProgram(fuzz_program);
       glDeleteProgram(sprite_program);
+      glDeleteProgram(corona_program);
+      glDeleteTextures(1, &corona_tex.id);
       glDeleteProgram(two_program);
       glDeleteProgram(copy_program);
       glDeleteBuffers(1, &two_vbo);
@@ -1295,9 +1353,14 @@ static glvert_t *gl_quad_in(glquads_t *l, gltex_t *tex)
       l->tex = t;
       {
          uint8_t *f = (uint8_t *)realloc(l->fuzz, cap);
+         uint32_t *c;
          if (!f)
             return NULL;
          l->fuzz = f;
+         c = (uint32_t *)realloc(l->rgb, sizeof(*c) * cap);
+         if (!c)
+            return NULL;
+         l->rgb = c;
       }
       l->cap = cap;
    }
@@ -1815,15 +1878,65 @@ static gltex_t *gl_patch(int lump, const rpatch_t *p)
    return t->bad ? NULL : t;
 }
 
+/* a sprite's colour for its corona: its texels through the game's palette,
+ * the brighter ones weighing more, brought up to full brightness */
+static uint32_t gl_corona_colour(gltex_t *t, const rpatch_t *p)
+{
+   const uint8_t *pal;
+   double r = 0, g = 0, b = 0, w = 0, top;
+   int x, i, y;
+
+   if (t->glow_valid)
+      return t->glow_rgb;
+   t->glow_valid = TRUE;
+   t->glow_rgb = 0xffc080;
+   pal = (const uint8_t *)W_CacheLumpName("PLAYPAL");
+   if (!pal)
+      return t->glow_rgb;
+   for (x = 0; x < p->width; x++)
+      for (i = 0; i < p->columns[x].numPosts; i++)
+      {
+         const rpost_t *post = &p->columns[x].posts[i];
+         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
+         {
+            const uint8_t *c = pal + 3 * p->columns[x].pixels[y];
+            const double l = (c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11) / 255.0;
+            const double k = l * l * l;
+            r += c[0] * k;
+            g += c[1] * k;
+            b += c[2] * k;
+            w += k;
+         }
+      }
+   W_UnlockLumpName("PLAYPAL");
+   if (w > 0)
+   {
+      r /= w;
+      g /= w;
+      b /= w;
+      top = r > g ? (r > b ? r : b) : (g > b ? g : b);
+      if (top > 0)
+      {
+         r = r * 255 / top;
+         g = g * 255 / top;
+         b = b * 255 / top;
+         t->glow_rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+      }
+   }
+   return t->glow_rgb;
+}
+
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
                            R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
-                           int x1, int x2)
+                           int style, int alpha, dbool emissive, int x1, int x2)
 {
    const int cls = R_WallColumnKernelClass(colfunc);
    gltex_t *t = NULL;
 
    masked_tex = NULL;
    masked_fuzz = FALSE;
+   masked_kind = GL_KIND_PLAIN;
+   masked_corona.on = FALSE;
    if (!view_active || drawvars.short_topleft != view_topleft)
       return FALSE;
    stat_masked++;
@@ -1857,13 +1970,69 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
    masked_tex   = t;
    masked_patch = patch;
    masked_fuzz  = fuzz;
+   if (alpha < 0)
+      alpha = 0;
+   if (alpha > 32)
+      alpha = 32;
+   masked_kind = fuzz ? GL_KIND_FUZZ
+               : style == 2 ? (uint8_t)(GL_KIND_ADD + alpha)
+               : style ? (uint8_t)(GL_KIND_LERP + alpha) : GL_KIND_PLAIN;
+
+   /* a glowing sprite's corona, if its middle shows: a halo a little
+    * bigger than the sprite, centred on it */
+   if (dopo_glow == 2 && style == 2 && emissive && lump >= 0 && corona_tex.id)
+   {
+      const int64_t top = sprtopscreen, bottom = top + (int64_t)spryscale * patch->height;
+      const int cx = (x1 + x2) / 2;
+      const int cy = (int)(((top + bottom) / 2) >> FRACBITS);
+      const int h = (int)((bottom - top) >> FRACBITS), w = x2 - x1 + 1;
+      const int r = (h > w ? h : w) * 9 / 10 + 1;
+      if (cx >= 0 && cx < viewwidth && cy > mceilingclip[cx] && cy < mfloorclip[cx])
+      {
+         masked_corona.on  = TRUE;
+         masked_corona.x0  = cx - r;
+         masked_corona.x1  = cx + r + 1;
+         masked_corona.y0  = cy - r;
+         masked_corona.y1  = cy + r + 1;
+         masked_corona.rgb = gl_corona_colour(t, patch);
+      }
+   }
    return TRUE;
 }
 
 void dopo_gl_masked_end(void)
 {
+   /* the corona over its sprite, cut to the view */
+   if (masked_corona.on)
+   {
+      const int x0 = masked_corona.x0 < 0 ? 0 : masked_corona.x0;
+      const int y0 = masked_corona.y0 < 0 ? 0 : masked_corona.y0;
+      const int x1 = masked_corona.x1 > viewwidth ? viewwidth : masked_corona.x1;
+      const int y1 = masked_corona.y1 > viewheight ? viewheight : masked_corona.y1;
+      const double w = masked_corona.x1 - masked_corona.x0;
+      const double h = masked_corona.y1 - masked_corona.y0;
+      glvert_t *q;
+      if (x0 < x1 && y0 < y1 && (q = gl_quad_in(&masked_q, &corona_tex)) != NULL)
+      {
+         const float s0 = (float)((x0 - masked_corona.x0) / w), s1 = (float)((x1 - masked_corona.x0) / w);
+         const float t0 = (float)((y0 - masked_corona.y0) / h), t1 = (float)((y1 - masked_corona.y0) / h);
+         q[0].x = q[3].x = (int16_t)(view_x0 + x0);
+         q[1].x = q[2].x = (int16_t)(view_x0 + x1);
+         q[0].y = q[1].y = (int16_t)(view_y0 + y0);
+         q[2].y = q[3].y = (int16_t)(view_y0 + y1);
+         q[0].s = q[3].s = s0;
+         q[1].s = q[2].s = s1;
+         q[0].t = q[1].t = t0;
+         q[2].t = q[3].t = t1;
+         q[0].l = q[1].l = q[2].l = q[3].l = 0;
+         masked_q.fuzz[masked_q.n - 1] = GL_KIND_CORONA;
+         masked_q.rgb[masked_q.n - 1] = masked_corona.rgb;
+      }
+   }
+   masked_corona.on = FALSE;
    masked_tex = NULL;
    masked_fuzz = FALSE;
+   masked_kind = GL_KIND_PLAIN;
 }
 
 /* the colour table row of a masked column */
@@ -1933,7 +2102,7 @@ void dopo_gl_masked_column(const rpatch_t *patch, const draw_column_vars_t *dc,
    q[0].t = q[1].t = q[2].t = q[3].t = tc;
    q[0].l = q[1].l = q[2].l = q[3].l =
       (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
-   masked_q.fuzz[masked_q.n - 1] = (uint8_t)masked_fuzz;
+   masked_q.fuzz[masked_q.n - 1] = masked_kind;
 }
 
 /* A post, clipped by R_DrawMaskedColumn: pixel y samples frac(y) =
@@ -1989,7 +2158,7 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
    q[2].s = q[3].s = s1;
    q[0].t = q[1].t = q[2].t = q[3].t = tc;
    q[0].l = q[1].l = q[2].l = q[3].l = lc;
-   masked_q.fuzz[masked_q.n - 1] = (uint8_t)masked_fuzz;
+   masked_q.fuzz[masked_q.n - 1] = masked_kind;
 
    /* over something the CPU drew, the post has to win: key under it */
    if (view_software)
@@ -2569,6 +2738,43 @@ static void gl_fuzz_state(unsigned width, unsigned height, int offset_x, dbool o
    }
 }
 
+/* Into a translucent or additive sprite's blend (GL_KIND_ADD, _LERP, at
+ * alpha 0..32), or the fuzz look; out of it with gl_fuzz_state(FALSE).
+ * Through the fuzz program: the colour times u_mul plus u_add. */
+static void gl_blend_state(unsigned width, unsigned height, int offset_x, int kind)
+{
+   float a;
+   if (kind == GL_KIND_FUZZ)
+   {
+      gl_fuzz_state(width, height, offset_x, TRUE);
+      return;
+   }
+   glUseProgram(fuzz_program);
+   glUniform2f(fuzz_u_scale, 2.0f / width, 2.0f / height);
+   glUniform2f(fuzz_u_offset, (float)offset_x, 0.0f);
+   glUniform1i(fuzz_u_tex, 0);
+   glUniform1i(fuzz_u_cmap, 1);
+   glEnable(GL_BLEND);
+   glColorMask(1, 1, 1, 0);
+   glBlendEquation(GL_FUNC_ADD);
+   if (kind < GL_KIND_LERP)
+   {
+      /* behind + the sprite x alpha */
+      a = (kind - GL_KIND_ADD) / 32.0f;
+      glUniform4f(fuzz_u_mul, a, a, a, 1);
+      glUniform4f(fuzz_u_add, 0, 0, 0, 0);
+      glBlendFunc(GL_ONE, GL_ONE);
+   }
+   else
+   {
+      /* the sprite at opacity alpha */
+      a = (kind - GL_KIND_LERP) / 32.0f;
+      glUniform4f(fuzz_u_mul, 1, 1, 1, 0);
+      glUniform4f(fuzz_u_add, 0, 0, 0, a);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   }
+}
+
 void dopo_gl_spectre_read(retro_environment_t environ_cb)
 {
    struct retro_variable var = { "prboom-spectre", NULL };
@@ -2629,9 +2835,30 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
       while (j < masked_q.n && masked_q.tex[j] == masked_q.tex[i]
              && masked_q.fuzz[j] == masked_q.fuzz[i])
          j++;
-      if (masked_q.fuzz[i])
+      if (masked_q.fuzz[i] == GL_KIND_CORONA)
       {
-         gl_fuzz_state(width, height, offset_x, TRUE);
+         int k;
+         glUseProgram(corona_program);
+         glUniform2f(corona_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(corona_u_offset, (float)offset_x, 0.0f);
+         glUniform1i(corona_u_tex, 0);
+         glEnable(GL_BLEND);
+         glColorMask(1, 1, 1, 0);
+         glBlendEquation(GL_FUNC_ADD);
+         glBlendFunc(GL_ONE, GL_ONE);
+         for (k = i; k < j; k++)
+         {
+            const uint32_t c = masked_q.rgb[k];
+            const float a = 0.45f / 255.0f;
+            glUniform4f(corona_u_color, ((c >> 16) & 255) * a, ((c >> 8) & 255) * a,
+                        (c & 255) * a, 0.0f);
+            gl_draw_range(masked_q.tex[k]->id, solid_q.n + k, 1);
+         }
+         gl_fuzz_state(width, height, offset_x, FALSE);
+      }
+      else if (masked_q.fuzz[i])
+      {
+         gl_blend_state(width, height, offset_x, masked_q.fuzz[i]);
          gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
          gl_fuzz_state(width, height, offset_x, FALSE);
       }

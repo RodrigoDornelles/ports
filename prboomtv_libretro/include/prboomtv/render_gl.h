@@ -125,13 +125,16 @@ dbool dopo_gl_span(const draw_span_vars_t *ds, int lump);
  * texture (texnum, lump -1) is about to be drawn post by post through
  * R_DrawMaskedColumn; plain says it is opaque, without brightmap, tint or
  * sloped edges; fuzz that it is a Spectre-like shadow, drawn in the
- * prboom-spectre look; x1..x2 its columns. True when the GPU takes its posts
+ * prboom-spectre look; style its DECORATE RenderStyle (0 opaque, 1
+ * translucent, 2 additive, as vis->translucent; prboom-glow makes the fire
+ * additive) at alpha 0..32, emissive that it is full bright (a corona
+ * with prboom-glow 2); x1..x2 its columns. True when the GPU takes its posts
  * (dopo_gl_masked_post),
  * so the caller must use the R_DrawMaskedColumn path for every column.
  */
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
                            R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
-                           int x1, int x2);
+                           int style, int alpha, dbool emissive, int x1, int x2);
 
 /** @brief The masked draw started by dopo_gl_masked_begin is done. */
 void dopo_gl_masked_end(void);

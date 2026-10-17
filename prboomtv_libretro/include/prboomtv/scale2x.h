@@ -1,9 +1,8 @@
 /**
  * @file scale2x.h
- * @brief The prboom-scale core option (library/core/enhancements/gpu/scale2x.c):
- * sprites and 2D patches made bigger with Scale2x once, on the CPU, when
- * they are loaded; the gl renderer sends them as textures, the software
- * renderer draws its sprites from them.
+ * @brief The prboom-scale core option (library/core/enhancements/gpu/hd/scale2x.c),
+ * gl only: sprites and 2D patches made bigger with Scale2x once, on the
+ * CPU, when gl.c uploads them as textures.
  * - 0: off.
  * - 1: twice the size, only the contour from Scale2x.
  * - 2, the default: twice the size, all of it from Scale2x.
@@ -36,12 +35,5 @@ void dopo_scale_read(retro_environment_t environ_cb);
  * memory; the caller frees it.
  */
 uint16_t *dopo_scale_image(const rpatch_t *p, int mode, int *k);
-
-/**
- * @brief A sprite lump's patch at the prboom-scale size, for the software
- * renderer (cached until the wads or the option change), and its factor
- * in *k. NULL when the option is off or it cannot be made.
- */
-const rpatch_t *dopo_scale_sprite(int lump, const rpatch_t *p, int *k);
 
 #endif

@@ -8,6 +8,7 @@
 /** @patch libretro/libretro.c 64 */
 #include "prboomtv/render_gl.h"
 #include "prboomtv/scale2x.h"
+#include "prboomtv/glow.h"
 /* @endpatch */
 
 /**
@@ -39,10 +40,12 @@
 /* @endpatch */
 
 /**
- * @brief prboom-spectre and prboom-scale can change while playing.
+ * @brief prboom-spectre, prboom-scale and prboom-glow can change while
+ * playing.
  *
  * @patch libretro/libretro.c 1525
  */
    dopo_gl_spectre_read(environ_cb);
    dopo_scale_read(environ_cb);
+   dopo_glow_read(environ_cb);
 /* @endpatch */

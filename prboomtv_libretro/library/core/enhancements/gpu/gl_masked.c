@@ -29,17 +29,19 @@
 /* @endpatch */
 
 /**
- * @brief A plain sprite (opaque, no brightmap, tint, sloped edges or
- * Raven shadow blend) is offered to the GPU; a fuzzy one too, drawn in
- * the prboom-spectre look.
+ * @brief A plain sprite (no brightmap, tint, sloped edges or Raven shadow
+ * blend) is offered to the GPU, translucent and additive ones (DECORATE,
+ * prboom-glow) with their blend; a fuzzy one too, drawn in the
+ * prboom-spectre look.
  *
  * @patch src/r_things.c 1211
  */
   const dbool gl_sprite = dopo_gl_masked_begin(patch, vis->patch + firstspritelump, -1, colfunc,
-        !sprmask && dcvars.edgetype != RDRAW_MASKEDCOLUMNEDGE_SLOPED && !vis->translucent
+        !sprmask && dcvars.edgetype != RDRAW_MASKEDCOLUMNEDGE_SLOPED
         && !(vis->tint_r | vis->tint_g | vis->tint_b)
         && !(raven && (vis->mobjflags & (MF_SHADOW | MF_ALTSHADOW)) && vis->colormap),
-        !dcvars.colormap, vis->x1, vis->x2);
+        !dcvars.colormap, vis->colormap ? vis->translucent : 0, vis->alpha, vis->emissive,
+        vis->x1, vis->x2);
 /* @endpatch */
 
 /**
@@ -60,7 +62,8 @@
  *
  * @patch src/r_segs.c 479
  */
-   dopo_gl_masked_begin(patch, -1, texnum, colfunc, !curline->linedef->translucent, FALSE, x1, x2);
+   dopo_gl_masked_begin(patch, -1, texnum, colfunc, !curline->linedef->translucent, FALSE,
+                        0, 0, FALSE, x1, x2);
 /* @endpatch */
 
 /** @patch src/r_segs.c 557 */
