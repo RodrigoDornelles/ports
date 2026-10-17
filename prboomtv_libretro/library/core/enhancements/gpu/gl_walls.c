@@ -16,15 +16,18 @@
 /* @endpatch */
 
 /**
- * @brief Each record keeps the texture of its column.
+ * @brief Each record keeps the texture of its column, and the wall it is
+ * on (its normal, for prboom-dynlight).
  *
  * @patch src/r_drawcmd.c 38
  */
   int                gltex;
+  const seg_t       *glseg;
 /* @endpatch */
 
 /** @patch src/r_drawcmd.c 67 */
   cmd->gltex = R_DrawCmdTexture;
+  cmd->glseg = R_DrawCmdSeg;
 /* @endpatch */
 
 /**
@@ -36,7 +39,7 @@
   if (dopo_gl_walls_begin())
   {
     for (i = 0; i < cmd_count; i++)
-      if (!dopo_gl_wall(&cmds[i].dc, cmds[i].fn, cmds[i].gltex))
+      if (!dopo_gl_wall(&cmds[i].dc, cmds[i].fn, cmds[i].gltex, cmds[i].glseg))
         cmds[i].fn(&cmds[i].dc);
     dopo_gl_walls_end();
     cmd_count = 0;
@@ -52,19 +55,23 @@
 /* @endpatch */
 
 /**
- * @brief The three wall tiers announce their texture before emitting.
+ * @brief The three wall tiers announce their texture and wall before
+ * emitting.
  *
  * @patch src/r_segs.c 1216
  */
          R_DrawCmdTexture = midtexture + 1;
+         R_DrawCmdSeg = curline;
 /* @endpatch */
 
 /** @patch src/r_segs.c 1260 */
                R_DrawCmdTexture = toptexture + 1;
+               R_DrawCmdSeg = curline;
 /* @endpatch */
 
 /** @patch src/r_segs.c 1309 */
                R_DrawCmdTexture = bottomtexture + 1;
+               R_DrawCmdSeg = curline;
 /* @endpatch */
 
 /** @patch src/r_plane.c 75 */
@@ -78,6 +85,7 @@
  * @patch src/r_plane.c 1291
  */
                R_DrawCmdTexture = 0;
+               R_DrawCmdSeg = NULL;
 /* @endpatch */
 
 /**
@@ -86,6 +94,7 @@
  * @patch src/r_plane.c 1320
  */
          R_DrawCmdTexture = texture + 1;
+         R_DrawCmdSeg = NULL;
 /* @endpatch */
 
 /**

@@ -40,8 +40,7 @@
         !sprmask && dcvars.edgetype != RDRAW_MASKEDCOLUMNEDGE_SLOPED
         && !(vis->tint_r | vis->tint_g | vis->tint_b)
         && !(raven && (vis->mobjflags & (MF_SHADOW | MF_ALTSHADOW)) && vis->colormap),
-        !dcvars.colormap, vis->colormap ? vis->translucent : 0, vis->alpha, vis->emissive,
-        vis->x1, vis->x2);
+        !dcvars.colormap, vis, vis->x1, vis->x2);
 /* @endpatch */
 
 /**
@@ -63,7 +62,7 @@
  * @patch src/r_segs.c 479
  */
    dopo_gl_masked_begin(patch, -1, texnum, colfunc, !curline->linedef->translucent, FALSE,
-                        0, 0, FALSE, x1, x2);
+                        NULL, x1, x2);
 /* @endpatch */
 
 /** @patch src/r_segs.c 557 */

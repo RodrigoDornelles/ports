@@ -51,6 +51,7 @@
 #include "prboomtv/render_gl.h"
 #include "prboomtv/scale2x.h"
 #include "prboomtv/glow.h"
+#include "prboomtv/dynlights.h"
 #include "prboomtv/shaders.h"
 #include "prboomtv/widescreen.h"
 
@@ -119,6 +120,7 @@ const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
 static int   patchcache_scale = 0;
 static int   gl2d_patches_scale = 0;
 int R_DrawCmdTexture = 0;
+const seg_t *R_DrawCmdSeg = NULL;
 int R_SpanTexture = 0;
 
 const struct retro_core_option_v2_definition dopo_gl_option =
@@ -245,6 +247,8 @@ GLFN(void, glUniform1i, (GLint, GLint));
 GLFN(void, glUniform1f, (GLint, GLfloat));
 GLFN(void, glUniform2f, (GLint, GLfloat, GLfloat));
 GLFN(void, glUniform3fv, (GLint, GLsizei, const GLfloat *));
+GLFN(void, glUniform4fv, (GLint, GLsizei, const GLfloat *));
+GLFN(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat));
 GLFN(void, glEnableVertexAttribArray, (GLuint));
 GLFN(void, glDisableVertexAttribArray, (GLuint));
 GLFN(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *));
@@ -408,6 +412,48 @@ static struct
 } masked_corona;
 static gltex_t         corona_tex;          /* a radial ramp, 64x64 */
 
+/* prboom-dynlight: the lights of the frame (dynlights.c), relative to the
+ * eye. What they reach is drawn a second time, over itself, by programs
+ * that add them: a wall column or a floor rectangle within a light's
+ * radius, on the side it faces, goes into a list of its own with where
+ * its corners are and its normal; what no light reaches costs nothing
+ * more. A sprite gets their sum at its middle. */
+static dopo_light_t    gl_dyn[DOPO_LIGHTS_MAX];
+static int             gl_dyn_n = 0;
+static double          gl_dyn_fx, gl_dyn_fy;   /* the view's direction */
+
+typedef struct
+{
+   glvert_t v;
+   float    p[3];   /* from the eye, map units */
+   float    n[3];
+} gllvert_t;
+
+typedef struct
+{
+   glpvert_t v;
+   float     p[3];
+   float     n[3];
+} glplvert_t;
+
+static gllvert_t      *litw_v = NULL;      /* lit wall columns, 4 corners each */
+static gltex_t       **litw_t = NULL;
+static int             litw_n = 0, litw_cap = 0;
+static glplvert_t     *litp_v = NULL;      /* lit floor rectangles */
+static gltex_t       **litp_t = NULL;
+static int             litp_n = 0, litp_cap = 0;
+
+/* the wall column being made into quads, when a light reaches it */
+static struct
+{
+   dbool  on;
+   float  px, py;     /* the column on the wall, from the eye */
+   double zk;         /* map units per row */
+   float  nx, ny;
+} gl_wlit;
+
+static uint32_t        masked_light = 0;   /* the sprite's light, 0xRRGGBB */
+
 /* The view of the software frame stays filled with the key between
  * frames: only the rows something drew on (the HUD, a menu, what the GPU
  * left to the CPU) are sent and laid over the GPU, and filled back with
@@ -469,6 +515,13 @@ static int             cmap_lumprows[64];
 /* programs and buffers */
 static GLuint          wall_program = 0, frame_program = 0, plane_program = 0;
 static GLuint          fuzz_program = 0, sprite_program = 0, corona_program = 0;
+static GLuint          wlit_program = 0, plit_program = 0, slit_program = 0;
+static GLuint          litw_vbo = 0, litp_vbo = 0;
+typedef struct
+{
+   GLint scale, offset, tex, cmap, zlight, rows, lpos, lcol, lcount, full, light;
+} gllit_u_t;
+static gllit_u_t       wlit_u, plit_u, slit_u;
 static GLint           corona_u_scale, corona_u_offset, corona_u_tex, corona_u_color;
 static GLint           sprite_u_scale, sprite_u_offset, sprite_u_tex, sprite_u_cmap;
 static GLuint          two_program = 0, copy_program = 0;
@@ -562,7 +615,8 @@ static dbool gl_load_functions(void)
    LOAD(glDeleteProgram) LOAD(glAttachShader) LOAD(glBindAttribLocation)
    LOAD(glLinkProgram) LOAD(glGetProgramiv) LOAD(glGetProgramInfoLog)
    LOAD(glUseProgram) LOAD(glGetUniformLocation) LOAD(glUniform1i)
-   LOAD(glUniform1f) LOAD(glUniform2f) LOAD(glUniform3fv) LOAD(glEnableVertexAttribArray)
+   LOAD(glUniform1f) LOAD(glUniform2f) LOAD(glUniform3fv) LOAD(glUniform4fv)
+   LOAD(glUniform3f) LOAD(glEnableVertexAttribArray)
    LOAD(glDisableVertexAttribArray) LOAD(glVertexAttribPointer)
    LOAD(glDrawElements) LOAD(glDrawArrays) LOAD(glGetString)
    LOAD(glGetIntegerv)
@@ -649,6 +703,8 @@ static void gl_forget_objects(void)
    wall_program = frame_program = plane_program = fuzz_program = sprite_program = 0;
    corona_program = 0;
    corona_tex.id = 0;
+   wlit_program = plit_program = slit_program = 0;
+   litw_vbo = litp_vbo = 0;
    two_program = copy_program = 0;
    two_vbo = pal_tex = trans_tex = ramp_tex = 0;
    gl2d_forget();
@@ -656,6 +712,24 @@ static void gl_forget_objects(void)
    zlight_valid = FALSE;
    vbo = ibo = frame_vbo = 0;
    frame_tex[0] = frame_tex[1] = 0;
+}
+
+/* the uniform locations of a lit program (-1 where it has none) */
+static void gl_lit_uniforms(gllit_u_t *u, GLuint prog)
+{
+   if (!prog)
+      return;
+   u->scale  = glGetUniformLocation(prog, "u_scale");
+   u->offset = glGetUniformLocation(prog, "u_offset");
+   u->tex    = glGetUniformLocation(prog, "u_tex");
+   u->cmap   = glGetUniformLocation(prog, "u_cmap");
+   u->zlight = glGetUniformLocation(prog, "u_zlight");
+   u->rows   = glGetUniformLocation(prog, "u_rows");
+   u->lpos   = glGetUniformLocation(prog, "u_lpos");
+   u->lcol   = glGetUniformLocation(prog, "u_lcol");
+   u->lcount = glGetUniformLocation(prog, "u_lcount");
+   u->full   = glGetUniformLocation(prog, "u_full");
+   u->light  = glGetUniformLocation(prog, "u_light");
 }
 
 static void gl_context_reset(void)
@@ -693,6 +767,19 @@ static void gl_context_reset(void)
       fuzz_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_fuzz), wall_attribs, 3);
       sprite_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite), wall_attribs, 3);
       corona_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_corona), wall_attribs, 3);
+      {
+         static const char *const wlit_attribs[] = { "a_pos", "a_st", "a_l", "a_world", "a_normal" };
+         static const char *const plit_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb",
+                                                     "a_world", "a_normal" };
+         wlit_program = gl_program(GL_SHADER(vert_wall_lit), GL_SHADER(frag_wall_lit), wlit_attribs, 5);
+         plit_program = gl_program(GL_SHADER(vert_plane_lit), GL_SHADER(frag_plane_lit), plit_attribs, 7);
+         slit_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite_lit), wall_attribs, 3);
+         gl_lit_uniforms(&wlit_u, wlit_program);
+         gl_lit_uniforms(&plit_u, plit_program);
+         gl_lit_uniforms(&slit_u, slit_program);
+         glGenBuffers(1, &litw_vbo);
+         glGenBuffers(1, &litp_vbo);
+      }
       two_program  = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_2d), wall_attribs, 3);
       copy_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_copy), wall_attribs, 3);
       if (!two_program || !copy_program)
@@ -810,6 +897,11 @@ static void gl_context_destroy(void)
       glDeleteProgram(fuzz_program);
       glDeleteProgram(sprite_program);
       glDeleteProgram(corona_program);
+      glDeleteProgram(wlit_program);
+      glDeleteProgram(plit_program);
+      glDeleteProgram(slit_program);
+      glDeleteBuffers(1, &litw_vbo);
+      glDeleteBuffers(1, &litp_vbo);
       glDeleteTextures(1, &corona_tex.id);
       glDeleteProgram(two_program);
       glDeleteProgram(copy_program);
@@ -888,6 +980,7 @@ static void gl_cache_reset(gltex_t **cache, int *n, int size)
    *cache = (gltex_t *)calloc(size > 0 ? size : 1, sizeof(**cache));
    *n = *cache ? size : 0;
    solid_q.n = masked_q.n = plane_n = 0;
+   litw_n = litp_n = 0;
    plane_run.on = FALSE;
 }
 
@@ -1289,6 +1382,9 @@ dbool dopo_gl_walls_begin(void)
    view_y0 = (int)(off / SCREENWIDTH);
    replay_stamp++;
    view_active = TRUE;
+   gl_dyn_n = dopo_dynlight_collect(gl_dyn, DOPO_LIGHTS_MAX);
+   gl_dyn_fx = cos(viewangle * (2 * M_PI / 4294967296.0));
+   gl_dyn_fy = sin(viewangle * (2 * M_PI / 4294967296.0));
 
    /* The key over the view (see view_keyed), before anything else is
     * drawn on it: the GPU paints the whole 3D view, and what the CPU still
@@ -1366,12 +1462,239 @@ static glvert_t *gl_quad_in(glquads_t *l, gltex_t *tex)
    }
    l->tex[l->n] = tex;
    l->fuzz[l->n] = 0;
+   l->rgb[l->n] = 0;
    return &l->v[4 * l->n++];
 }
 
 static glvert_t *gl_quad(gltex_t *tex)
 {
    return gl_quad_in(&solid_q, tex);
+}
+
+/* ---- prboom-dynlight ---- */
+
+static double gl_angle(angle_t a)
+{
+   return a * (2 * M_PI / 4294967296.0);
+}
+
+/* where a pixel column meets something at depth (along the view) from
+ * the eye */
+static void gl_ray(int x, double depth, double *px, double *py)
+{
+   const double len = depth / cos(gl_angle(xtoviewangle[x]));
+   const double dir = gl_angle((angle_t)(viewangle + xtoviewangle[x]));
+   *px = cos(dir) * len;
+   *py = sin(dir) * len;
+}
+
+/* Whether a light reaches the wall column of a record, and where the
+ * column is: at the depth its scale gives (iscale is map units per row),
+ * the wall's normal turned to the eye; a light counts on the side the
+ * wall faces, within its radius of the column's span. */
+static void gl_wall_lit(const draw_column_vars_t *dc, const seg_t *seg)
+{
+   const double zk = dc->iscale / 65536.0;
+   const double depth = projectiony / 65536.0 * zk;
+   double px, py, nx, ny, nl, ztop, zbot;
+   int i;
+
+   if (dc->iscale <= 0 || depth < 1 || depth > 8192)
+      return;
+   gl_ray(dc->x, depth, &px, &py);
+   nx = (seg->v2->y - seg->v1->y) / 65536.0;
+   ny = -(seg->v2->x - seg->v1->x) / 65536.0;
+   nl = sqrt(nx * nx + ny * ny);
+   if (nl <= 0)
+      return;
+   nx /= nl;
+   ny /= nl;
+   if (-px * nx - py * ny < 0)
+   {
+      nx = -nx;
+      ny = -ny;
+   }
+   ztop = -(dc->yl - 0.5 - centery) * zk;
+   zbot = -(dc->yh + 0.5 - centery) * zk;
+   for (i = 0; i < gl_dyn_n; i++)
+   {
+      const dopo_light_t *l = &gl_dyn[i];
+      const double dx = l->x - px, dy = l->y - py;
+      const double dz = l->z > ztop ? l->z - ztop : l->z < zbot ? zbot - l->z : 0;
+      if (dx * nx + dy * ny > 0 && dx * dx + dy * dy + dz * dz < (double)l->radius * l->radius)
+      {
+         gl_wlit.on = TRUE;
+         gl_wlit.px = (float)px;
+         gl_wlit.py = (float)py;
+         gl_wlit.zk = zk;
+         gl_wlit.nx = (float)nx;
+         gl_wlit.ny = (float)ny;
+         return;
+      }
+   }
+}
+
+/* a wall quad again, for the lit pass: the column's place, the height of
+ * its top and bottom edges (row r's centre is r - centery rows down) */
+static void gl_column_lit(gltex_t *t, const glvert_t *q, int y0, int y1)
+{
+   gllvert_t *v;
+   int i;
+   if (litw_n == litw_cap)
+   {
+      const int cap = litw_cap ? litw_cap * 2 : 1024;
+      gllvert_t *nv = (gllvert_t *)realloc(litw_v, sizeof(*nv) * 4 * cap);
+      gltex_t **nt;
+      if (!nv)
+         return;
+      litw_v = nv;
+      nt = (gltex_t **)realloc(litw_t, sizeof(*nt) * cap);
+      if (!nt)
+         return;
+      litw_t = nt;
+      litw_cap = cap;
+   }
+   litw_t[litw_n] = t;
+   v = &litw_v[4 * litw_n++];
+   for (i = 0; i < 4; i++)
+   {
+      const int edge = i < 2 ? y0 : y1;
+      v[i].v = q[i];
+      v[i].p[0] = gl_wlit.px;
+      v[i].p[1] = gl_wlit.py;
+      v[i].p[2] = (float)(-(edge - 0.5 - centery) * gl_wlit.zk);
+      v[i].n[0] = gl_wlit.nx;
+      v[i].n[1] = gl_wlit.ny;
+      v[i].n[2] = 0;
+   }
+}
+
+/* A floor rectangle again, for the lit pass, if a light reaches it: each
+ * corner where its pixel column meets the plane at the corner's distance;
+ * a light counts above a floor (below a ceiling), within its radius of
+ * the rectangle. w: the distances at the top and bottom edges. */
+static void gl_plane_lit(const glpvert_t *q, const double w[2])
+{
+   const dbool floor_ = plane_run.yt >= centery;
+   const double z = (floor_ ? -1 : 1) * plane_run.height / 65536.0;
+   double cx[4], cy[4], minx = 1e30, maxx = -1e30, miny = 1e30, maxy = -1e30;
+   glplvert_t *v;
+   int i, j, k;
+
+   for (i = 0; i < 2; i++)
+      for (j = 0; j < 2; j++)
+      {
+         const int c = i == 0 ? j : 3 - j;
+         gl_ray(j ? plane_run.x2 + 1 : plane_run.x1, w[i], &cx[c], &cy[c]);
+         if (cx[c] < minx) minx = cx[c];
+         if (cx[c] > maxx) maxx = cx[c];
+         if (cy[c] < miny) miny = cy[c];
+         if (cy[c] > maxy) maxy = cy[c];
+      }
+   for (k = 0; k < gl_dyn_n; k++)
+   {
+      const dopo_light_t *l = &gl_dyn[k];
+      const double dz = l->z - z;
+      const double dx = l->x < minx ? minx - l->x : l->x > maxx ? l->x - maxx : 0;
+      const double dy = l->y < miny ? miny - l->y : l->y > maxy ? l->y - maxy : 0;
+      if ((floor_ ? dz > 0 : dz < 0)
+            && dx * dx + dy * dy + dz * dz < (double)l->radius * l->radius)
+         break;
+   }
+   if (k == gl_dyn_n)
+      return;
+   if (litp_n == litp_cap)
+   {
+      const int cap = litp_cap ? litp_cap * 2 : 256;
+      glplvert_t *nv = (glplvert_t *)realloc(litp_v, sizeof(*nv) * 4 * cap);
+      gltex_t **nt;
+      if (!nv)
+         return;
+      litp_v = nv;
+      nt = (gltex_t **)realloc(litp_t, sizeof(*nt) * cap);
+      if (!nt)
+         return;
+      litp_t = nt;
+      litp_cap = cap;
+   }
+   litp_t[litp_n] = plane_run.tex;
+   v = &litp_v[4 * litp_n++];
+   for (i = 0; i < 4; i++)
+   {
+      v[i].v = q[i];
+      v[i].p[0] = (float)cx[i];
+      v[i].p[1] = (float)cy[i];
+      v[i].p[2] = (float)z;
+      v[i].n[0] = v[i].n[1] = 0;
+      v[i].n[2] = floor_ ? 1.0f : -1.0f;
+   }
+}
+
+/* the sum of the lights at a sprite's middle, 0xRRGGBB (0: none) */
+static uint32_t gl_sprite_lit(const vissprite_t *vis)
+{
+   double px, py, pz, r = 0, g = 0, b = 0;
+   int i;
+   if (vis->mobjflags & MF_PLAYERSPRITE)
+   {
+      px = py = 0;
+      pz = -16;           /* the weapon, at the eye */
+   }
+   else
+   {
+      px = (vis->gx - viewx) / 65536.0;
+      py = (vis->gy - viewy) / 65536.0;
+      pz = ((vis->gz / 2 + vis->gzt / 2) - viewz) / 65536.0;
+   }
+   for (i = 0; i < gl_dyn_n; i++)
+   {
+      const dopo_light_t *l = &gl_dyn[i];
+      const double dx = l->x - px, dy = l->y - py, dz = l->z - pz;
+      const double att = 1.0 - sqrt(dx * dx + dy * dy + dz * dz) / l->radius;
+      if (att > 0)
+      {
+         r += l->r * att;
+         g += l->g * att;
+         b += l->b * att;
+      }
+   }
+   if (r + g + b < 0.02)
+      return 0;
+   r = r > 1 ? 255 : r * 255;
+   g = g > 1 ? 255 : g * 255;
+   b = b > 1 ? 255 : b * 255;
+   return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b | 0x01000000u;
+}
+
+/* a lit program's view, textures and lights */
+static void gl_lit_set(const gllit_u_t *u, unsigned width, unsigned height, int offset_x)
+{
+   GLfloat pos[4 * DOPO_LIGHTS_MAX], col[3 * DOPO_LIGHTS_MAX];
+   int i;
+   for (i = 0; i < gl_dyn_n; i++)
+   {
+      pos[4 * i + 0] = gl_dyn[i].x;
+      pos[4 * i + 1] = gl_dyn[i].y;
+      pos[4 * i + 2] = gl_dyn[i].z;
+      pos[4 * i + 3] = gl_dyn[i].radius;
+      col[3 * i + 0] = gl_dyn[i].r;
+      col[3 * i + 1] = gl_dyn[i].g;
+      col[3 * i + 2] = gl_dyn[i].b;
+   }
+   glUniform2f(u->scale, 2.0f / width, 2.0f / height);
+   glUniform2f(u->offset, (float)offset_x, 0.0f);
+   glUniform1i(u->tex, 0);
+   glUniform1i(u->cmap, 1);
+   glUniform1i(u->zlight, 2);
+   glUniform1f(u->rows, (float)cmap_gl_rows);
+   if (gl_dyn_n)
+   {
+      glUniform4fv(u->lpos, gl_dyn_n, pos);
+      glUniform3fv(u->lcol, gl_dyn_n, col);
+   }
+   glUniform1i(u->lcount, gl_dyn_n);
+   /* the palette alone: the texel at full brightness */
+   glUniform1f(u->full, (cmap_rows - 1 + 0.5f) / cmap_gl_rows);
 }
 
 /* rows y0..y1-1 of column x, the texel row running from v0 at the top
@@ -1392,6 +1715,8 @@ static dbool gl_column(gltex_t *t, int x, int y0, int y1,
    q[3].x = xa; q[3].y = yb; q[3].s = s1;
    q[0].t = q[1].t = q[2].t = q[3].t = tc;
    q[0].l = q[1].l = q[2].l = q[3].l = lc;
+   if (gl_wlit.on)
+      gl_column_lit(t, q, y0, y1);
    return TRUE;
 }
 
@@ -1406,7 +1731,8 @@ static int64_t gl_floordiv(int64_t a, int64_t b)
  * pixel's centre is y + 0.5, so the quad's edges carry frac half a step
  * before the first row and half a step after the last, and the GPU
  * interpolates back to frac(y) at every centre. */
-dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
+dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex,
+                   const seg_t *seg)
 {
    const rpatch_t *p;
    gltex_t *t;
@@ -1448,6 +1774,9 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex)
    }
    tc = (float)((col + 0.5) / t->gl_height);
    lc = (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
+   gl_wlit.on = FALSE;
+   if (gl_dyn_n && seg)
+      gl_wall_lit(dc, seg);
 
    if (dc->texheight && !(dc->texheight & (dc->texheight - 1)))
    {
@@ -1687,6 +2016,8 @@ static void gl_plane_flush(void)
          c->base = (uint8_t)plane_run.base;
          c->pad[0] = c->pad[1] = 0;
       }
+   if (gl_dyn_n)
+      gl_plane_lit(q, w);
 }
 
 dbool dopo_gl_span(const draw_span_vars_t *ds, int lump)
@@ -1773,6 +2104,8 @@ static void gl_zlight_update(void)
    zlight_valid = TRUE;
 }
 
+static void gl_draw_lit_planes(unsigned width, unsigned height, int offset_x);
+
 static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
 {
    int i, first = 0, used_n2 = 0;
@@ -1855,6 +2188,8 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
       glDisableVertexAttribArray(i);
    stat_planes += plane_n;
    plane_n = 0;
+   if (litp_n)
+      gl_draw_lit_planes(width, height, offset_x);
 }
 
 /* ---- sprites and masked textures ---- */
@@ -1928,15 +2263,19 @@ static uint32_t gl_corona_colour(gltex_t *t, const rpatch_t *p)
 
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
                            R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
-                           int style, int alpha, dbool emissive, int x1, int x2)
+                           const vissprite_t *vis, int x1, int x2)
 {
    const int cls = R_WallColumnKernelClass(colfunc);
+   const int style = vis && vis->colormap ? vis->translucent : 0;
+   int alpha = vis ? vis->alpha : 0;
+   const dbool emissive = vis && vis->emissive;
    gltex_t *t = NULL;
 
    masked_tex = NULL;
    masked_fuzz = FALSE;
    masked_kind = GL_KIND_PLAIN;
    masked_corona.on = FALSE;
+   masked_light = 0;
    if (!view_active || drawvars.short_topleft != view_topleft)
       return FALSE;
    stat_masked++;
@@ -1977,6 +2316,9 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
    masked_kind = fuzz ? GL_KIND_FUZZ
                : style == 2 ? (uint8_t)(GL_KIND_ADD + alpha)
                : style ? (uint8_t)(GL_KIND_LERP + alpha) : GL_KIND_PLAIN;
+   /* full bright frames shine on their own, as in GZDoom */
+   if (gl_dyn_n && vis && masked_kind == GL_KIND_PLAIN && !emissive)
+      masked_light = gl_sprite_lit(vis);
 
    /* a glowing sprite's corona, if its middle shows: a halo a little
     * bigger than the sprite, centred on it */
@@ -2033,6 +2375,7 @@ void dopo_gl_masked_end(void)
    masked_tex = NULL;
    masked_fuzz = FALSE;
    masked_kind = GL_KIND_PLAIN;
+   masked_light = 0;
 }
 
 /* the colour table row of a masked column */
@@ -2103,6 +2446,7 @@ void dopo_gl_masked_column(const rpatch_t *patch, const draw_column_vars_t *dc,
    q[0].l = q[1].l = q[2].l = q[3].l =
       (uint16_t)(((row + 0.5) / cmap_gl_rows) * 65535.0 + 0.5);
    masked_q.fuzz[masked_q.n - 1] = masked_kind;
+   masked_q.rgb[masked_q.n - 1] = masked_light;
 }
 
 /* A post, clipped by R_DrawMaskedColumn: pixel y samples frac(y) =
@@ -2159,6 +2503,7 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
    q[0].t = q[1].t = q[2].t = q[3].t = tc;
    q[0].l = q[1].l = q[2].l = q[3].l = lc;
    masked_q.fuzz[masked_q.n - 1] = masked_kind;
+   masked_q.rgb[masked_q.n - 1] = masked_light;
 
    /* over something the CPU drew, the post has to win: key under it */
    if (view_software)
@@ -2798,6 +3143,82 @@ void dopo_gl_spectre_read(retro_environment_t environ_cb)
 }
 
 
+/* the wall columns the lights reach, over themselves (prboom-dynlight) */
+static void gl_draw_lit_walls(unsigned width, unsigned height, int offset_x)
+{
+   int i;
+   glUseProgram(wlit_program);
+   gl_lit_set(&wlit_u, width, height, offset_x);
+   glBindBuffer(GL_ARRAY_BUFFER, litw_vbo);
+   glBufferData(GL_ARRAY_BUFFER, sizeof(gllvert_t) * 4 * litw_n, litw_v, GL_STREAM_DRAW);
+   glEnableVertexAttribArray(3);
+   glEnableVertexAttribArray(4);
+   for (i = 0; i < litw_n; )
+   {
+      int j = i + 1, start, count;
+      while (j < litw_n && litw_t[j] == litw_t[i])
+         j++;
+      glBindTexture(GL_TEXTURE_2D, litw_t[i]->id);
+      for (start = i, count = j - i; count > 0; )
+      {
+         const int chunk = count < GL_MAX_QUADS_PER_DRAW ? count : GL_MAX_QUADS_PER_DRAW;
+         const char *b = (const char *)(intptr_t)(start * 4 * sizeof(gllvert_t));
+         glVertexAttribPointer(0, 2, GL_SHORT, 0, sizeof(gllvert_t), b);
+         glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(gllvert_t), b + 4);
+         glVertexAttribPointer(2, 1, GL_UNSIGNED_SHORT, 1, sizeof(gllvert_t), b + 12);
+         glVertexAttribPointer(3, 3, GL_FLOAT, 0, sizeof(gllvert_t), b + 16);
+         glVertexAttribPointer(4, 3, GL_FLOAT, 0, sizeof(gllvert_t), b + 28);
+         glDrawElements(GL_TRIANGLES, chunk * 6, GL_UNSIGNED_SHORT, 0);
+         stat_draws++;
+         start += chunk;
+         count -= chunk;
+      }
+      i = j;
+   }
+   glDisableVertexAttribArray(3);
+   glDisableVertexAttribArray(4);
+   litw_n = 0;
+}
+
+/* the floor rectangles the lights reach, over themselves */
+static void gl_draw_lit_planes(unsigned width, unsigned height, int offset_x)
+{
+   int i;
+   glUseProgram(plit_program);
+   gl_lit_set(&plit_u, width, height, offset_x);
+   glBindBuffer(GL_ARRAY_BUFFER, litp_vbo);
+   glBufferData(GL_ARRAY_BUFFER, sizeof(glplvert_t) * 4 * litp_n, litp_v, GL_STREAM_DRAW);
+   for (i = 0; i < 7; i++)
+      glEnableVertexAttribArray(i);
+   for (i = 0; i < litp_n; )
+   {
+      int j = i + 1, start, count;
+      while (j < litp_n && litp_t[j] == litp_t[i])
+         j++;
+      glBindTexture(GL_TEXTURE_2D, litp_t[i]->id);
+      for (start = i, count = j - i; count > 0; )
+      {
+         const int chunk = count < GL_MAX_QUADS_PER_DRAW ? count : GL_MAX_QUADS_PER_DRAW;
+         const char *b = (const char *)(intptr_t)(start * 4 * sizeof(glplvert_t));
+         glVertexAttribPointer(0, 2, GL_SHORT, 0, sizeof(glplvert_t), b);
+         glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(glplvert_t), b + 4);
+         glVertexAttribPointer(2, 1, GL_FLOAT, 0, sizeof(glplvert_t), b + 12);
+         glVertexAttribPointer(3, 1, GL_FLOAT, 0, sizeof(glplvert_t), b + 16);
+         glVertexAttribPointer(4, 2, GL_UNSIGNED_BYTE, 0, sizeof(glplvert_t), b + 20);
+         glVertexAttribPointer(5, 3, GL_FLOAT, 0, sizeof(glplvert_t), b + 24);
+         glVertexAttribPointer(6, 3, GL_FLOAT, 0, sizeof(glplvert_t), b + 36);
+         glDrawElements(GL_TRIANGLES, chunk * 6, GL_UNSIGNED_SHORT, 0);
+         stat_draws++;
+         start += chunk;
+         count -= chunk;
+      }
+      i = j;
+   }
+   for (i = 1; i < 7; i++)
+      glDisableVertexAttribArray(i);
+   litp_n = 0;
+}
+
 static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
 {
    int i;
@@ -2828,12 +3249,18 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
       gl_draw_range(t->id, t->first, t->count);
       t->count = 0;
    }
+   if (litw_n)
+   {
+      gl_draw_lit_walls(width, height, offset_x);
+      glUseProgram(wall_program);
+      glBindBuffer(GL_ARRAY_BUFFER, vbo);
+   }
    /* in order, one draw per run of the same texture (a sprite's posts) */
    for (i = 0; i < masked_q.n; )
    {
       int j = i + 1;
       while (j < masked_q.n && masked_q.tex[j] == masked_q.tex[i]
-             && masked_q.fuzz[j] == masked_q.fuzz[i])
+             && masked_q.fuzz[j] == masked_q.fuzz[i] && masked_q.rgb[j] == masked_q.rgb[i])
          j++;
       if (masked_q.fuzz[i] == GL_KIND_CORONA)
       {
@@ -2861,6 +3288,17 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
          gl_blend_state(width, height, offset_x, masked_q.fuzz[i]);
          gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
          gl_fuzz_state(width, height, offset_x, FALSE);
+      }
+      else if (masked_q.rgb[i])
+      {
+         /* near dynamic lights (prboom-dynlight) */
+         const uint32_t c = masked_q.rgb[i];
+         glUseProgram(slit_program);
+         gl_lit_set(&slit_u, width, height, offset_x);
+         glUniform3f(slit_u.light, ((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f,
+                     (c & 255) / 255.0f);
+         gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
+         glUseProgram(wall_program);
       }
       else if (masked_q.tex[i]->alpha)
       {

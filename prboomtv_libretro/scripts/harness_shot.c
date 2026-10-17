@@ -34,6 +34,7 @@
 #include "libretro.h"
 
 static const char *g_dir;
+static const char *g_core_path;
 static unsigned g_fmt = RETRO_PIXEL_FORMAT_0RGB1555;
 static int g_frame;
 static struct { int from, to, id; } g_holds[64];
@@ -161,6 +162,9 @@ static bool env_cb(unsigned cmd, void *data)
    {
    case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
       g_fmt = *(const enum retro_pixel_format *)data;
+      return true;
+   case RETRO_ENVIRONMENT_GET_LIBRETRO_PATH:
+      *(const char **)data = g_core_path;
       return true;
    case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
    case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
@@ -347,6 +351,7 @@ int main(int argc, char **argv)
    core = dlopen(argv[1], RTLD_NOW);
    if (!core) { fprintf(stderr, "%s\n", dlerror()); return 1; }
    g_dir = argv[3];
+   g_core_path = argv[1];
    frames = atoi(argv[4]);
    for (i = 5; i < argc; i++)
    {

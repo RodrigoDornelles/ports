@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "libretro.h"
 #include "doomtype.h"
+#include "r_defs.h"
 #include "r_draw.h"
 #include "r_patch.h"
 
@@ -73,6 +74,13 @@ extern const struct retro_core_option_v2_definition dopo_gl_option;
 extern int R_DrawCmdTexture;
 
 /**
+ * @brief The wall (seg) of the wall columns being emitted, NULL for the
+ * sky; its records keep it for prboom-dynlight, which lights a wall from
+ * the side it faces.
+ */
+extern const seg_t *R_DrawCmdSeg;
+
+/**
  * @brief Reads prboom-render and, for gl or auto, asks the frontend for the
  * GL context. auto falls back to software when it is refused; gl does not:
  * False only when gl was asked and the frontend refused it, and the game
@@ -94,7 +102,8 @@ dbool dopo_gl_walls_begin(void);
  * reproduce it exactly (brightmap, coloured light, unknown texture): the
  * caller draws it in software.
  */
-dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex);
+dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex,
+                   const seg_t *seg);
 
 /** @brief Ends the replay started by dopo_gl_walls_begin. */
 void dopo_gl_walls_end(void);
@@ -125,16 +134,17 @@ dbool dopo_gl_span(const draw_span_vars_t *ds, int lump);
  * texture (texnum, lump -1) is about to be drawn post by post through
  * R_DrawMaskedColumn; plain says it is opaque, without brightmap, tint or
  * sloped edges; fuzz that it is a Spectre-like shadow, drawn in the
- * prboom-spectre look; style its DECORATE RenderStyle (0 opaque, 1
- * translucent, 2 additive, as vis->translucent; prboom-glow makes the fire
- * additive) at alpha 0..32, emissive that it is full bright (a corona
- * with prboom-glow 2); x1..x2 its columns. True when the GPU takes its posts
+ * prboom-spectre look; vis the sprite (NULL for a masked texture): its
+ * DECORATE RenderStyle (vis->translucent: 1 translucent, 2 additive, which
+ * prboom-glow gives the fire) at vis->alpha, whether it is full bright (a
+ * corona with prboom-glow 2), and where it is (prboom-dynlight); x1..x2
+ * its columns. True when the GPU takes its posts
  * (dopo_gl_masked_post),
  * so the caller must use the R_DrawMaskedColumn path for every column.
  */
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
                            R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
-                           int style, int alpha, dbool emissive, int x1, int x2);
+                           const vissprite_t *vis, int x1, int x2);
 
 /** @brief The masked draw started by dopo_gl_masked_begin is done. */
 void dopo_gl_masked_end(void);
