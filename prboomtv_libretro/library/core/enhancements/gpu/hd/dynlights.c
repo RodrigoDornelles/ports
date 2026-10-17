@@ -16,9 +16,16 @@
  * the things carrying a light are gathered and the nearest few go to the
  * GPU (gl.c), which lights only what lies within their reach.
  *
+ * Maps made for GZDoom also place lights as things of their own (editor
+ * numbers 9800 and up, in Hexen-format and UDMF maps: the colour in args
+ * 0-2, the size in arg 3, the other size in arg 4); with prboom-9800 they
+ * join the lights of the frame, whatever prboom-dynlight's level.
+ * Subtractive lights and spotlights are left out.
+ *
  * The module is a hunk at the top of r_dynlight.c, the software
  * renderer's own approximation of GLDEFS lights, which stands down while
- * the GPU lights; and a hunk in w_pk3.c reads one member of a pk3.
+ * the GPU lights; a hunk in w_pk3.c reads one member of a pk3, and hunks
+ * in p_mobj.c and p_setup.c take the map's lights.
  */
 
 /**
@@ -66,6 +73,26 @@ const struct retro_core_option_v2_definition dopo_dynlight_option =
 
 int dopo_dynlight = 2;
 
+const struct retro_core_option_v2_definition dopo_maplight_option =
+{
+   "prboom-9800",
+   "Map Lights (gl only)",
+   NULL,
+   "The lights a map made for GZDoom places itself (things 9800 and up), "
+   "the lighting its author planned; with Dynamic Lights on, only with the "
+   "gl renderer. Takes effect when a map loads.",
+   NULL,
+   NULL,
+   {
+      { "enabled",  NULL },
+      { "disabled", NULL },
+      { NULL, NULL },
+   },
+   "enabled"
+};
+
+int dopo_maplight = 1;
+
 static char dl_system_dir[1024];
 static char dl_core_dir[1024];
 
@@ -78,6 +105,10 @@ void dopo_dynlight_read(retro_environment_t environ_cb)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
          && (!strcmp(var.value, "0") || !strcmp(var.value, "1")))
       dopo_dynlight = var.value[0] - '0';
+   var.key = "prboom-9800";
+   var.value = NULL;
+   dopo_maplight = !(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
+                     && !strcmp(var.value, "disabled"));
    if (environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &dir) && dir)
       snprintf(dl_system_dir, sizeof(dl_system_dir), "%s", dir);
    dir = NULL;
@@ -388,6 +419,58 @@ static void dl_parse_lights_pk3(void)
    }
 }
 
+/* ---- the map's lights ---- */
+
+#define DL_MAP_MAX 1024
+static struct
+{
+   fixed_t         x, y, z;
+   dl_def_t        d;
+   const sector_t *sector;   /* a sector light: scaled by its light */
+} dl_map[DL_MAP_MAX];
+static int dl_map_n = 0;
+
+void dopo_maplight_clear(void)
+{
+   dl_map_n = 0;
+}
+
+int dopo_maplight_add(int x, int y, int angle, int type)
+{
+   const int group = (type - 9800) / 10, variant = type % 10;
+   const fixed_t fx = x * FRACUNIT, fy = y * FRACUNIT;
+   const sector_t *sec;
+   dl_def_t *d;
+
+   if (type < 9800 || type > 9899)
+      return 0;
+   /* point lights, plain, additive or attenuated; the others (subtractive,
+    * spotlights) are taken and left out */
+   if ((group != 0 && group != 1 && group != 3) || variant > 4 || dl_map_n == DL_MAP_MAX
+         || hexen_thing_args[3] <= 0)
+      return 1;
+   sec = R_PointInSubsector(fx, fy)->sector;
+   dl_map[dl_map_n].x = fx;
+   dl_map[dl_map_n].y = fy;
+   dl_map[dl_map_n].z = sec->floorheight + hexen_thing_height * FRACUNIT;
+   dl_map[dl_map_n].sector = variant == 3 ? sec : NULL;
+   d = &dl_map[dl_map_n].d;
+   memset(d, 0, sizeof(*d));
+   d->r = hexen_thing_args[0] / 255.0f;
+   d->g = hexen_thing_args[1] / 255.0f;
+   d->b = hexen_thing_args[2] / 255.0f;
+   d->size = hexen_thing_args[3];
+   d->size2 = hexen_thing_args[4] > 0 ? hexen_thing_args[4] : d->size;
+   /* the angle: a pulse's period in tics, a flicker's chance in degrees */
+   d->kind = variant == 1 ? DLK_PULSE : variant == 2 ? DLK_FLICKER
+           : variant == 4 ? DLK_FLICKER2 : DLK_POINT;
+   d->interval = angle > 0 ? angle : TICRATE;
+   d->chance = angle > 0 ? angle / 360.0f : 0.5f;
+   d->has_offset = 1;
+   dl_map_n++;
+   return 1;
+}
+
 /* everything again for a new set of wads */
 static void dl_load(void)
 {
@@ -484,8 +567,8 @@ static float dl_radius(const dl_def_t *d, const mobj_t *who)
 
 int dopo_dynlight_collect(dopo_light_t *out, int max)
 {
-   static dopo_light_t all[256];
-   static float dist[256];
+   static dopo_light_t all[1024];
+   static float dist[1024];
    thinker_t *th;
    const float vx = viewx / 65536.0f, vy = viewy / 65536.0f, vz = viewz / 65536.0f;
    const float fx = (float)cos(viewangle * (2 * M_PI / 4294967296.0));
@@ -496,9 +579,9 @@ int dopo_dynlight_collect(dopo_light_t *out, int max)
       return 0;
    if (dl_owner != lumpinfo || dl_owner_n != numlumps || dl_table_n != numsprites)
       dl_load();
-   if (!dl_ndefs)
+   if (!dl_ndefs && !(dopo_maplight && dl_map_n))
       return 0;
-   for (th = thinkercap.next; th != &thinkercap && n < 256; th = th->next)
+   for (th = thinkercap.next; th != &thinkercap && n < 1024; th = th->next)
    {
       const mobj_t *mo;
       const dl_def_t *d;
@@ -524,6 +607,33 @@ int dopo_dynlight_collect(dopo_light_t *out, int max)
       l->g = d->g;
       l->b = d->b;
       /* behind the eye with all of its reach: nothing it lights shows */
+      fwd = l->x * fx + l->y * fy;
+      if (fwd < -r)
+         continue;
+      dist[n] = l->x * l->x + l->y * l->y + l->z * l->z;
+      n++;
+   }
+   /* the map's own lights */
+   for (i = 0; dopo_maplight && i < dl_map_n && n < 1024; i++)
+   {
+      dopo_light_t *l = &all[n];
+      const dl_def_t *d = &dl_map[i].d;
+      mobj_t where;
+      float r, fwd;
+      where.x = dl_map[i].x;
+      where.y = dl_map[i].y;
+      r = 2 * dl_radius(d, &where);
+      if (dl_map[i].sector)
+         r *= dl_map[i].sector->lightlevel / 255.0f;
+      if (r < 1)
+         continue;
+      l->x = dl_map[i].x / 65536.0f - vx;
+      l->y = dl_map[i].y / 65536.0f - vy;
+      l->z = dl_map[i].z / 65536.0f - vz;
+      l->radius = r;
+      l->r = d->r;
+      l->g = d->g;
+      l->b = d->b;
       fwd = l->x * fx + l->y * fy;
       if (fwd < -r)
          continue;
@@ -581,4 +691,26 @@ unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
   return out;
 }
 
+/* @endpatch */
+
+/** @patch src/p_mobj.c 62 */
+#include "prboomtv/dynlights.h"
+/* @endpatch */
+
+/**
+ * @brief The map's lights (things 9800 and up), taken like the other
+ * ZDoom editor-only things around them.
+ *
+ * @patch src/p_mobj.c 2480
+ */
+      if (dopo_maplight_add(mthing->x, mthing->y, mthing->angle, thingtype))
+        return;
+/* @endpatch */
+
+/** @patch src/p_setup.c 67 */
+#include "prboomtv/dynlights.h"
+/* @endpatch */
+
+/** @patch src/p_setup.c 3097 */
+   dopo_maplight_clear();       /* and last level's map lights */
 /* @endpatch */

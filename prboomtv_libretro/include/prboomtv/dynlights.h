@@ -26,6 +26,22 @@ extern int dopo_dynlight;
  * for lights.pk3. */
 void dopo_dynlight_read(retro_environment_t environ_cb);
 
+/** @brief The prboom-9800 core option: the lights a map places itself. */
+extern const struct retro_core_option_v2_definition dopo_maplight_option;
+
+/** @brief prboom-9800 in effect. */
+extern int dopo_maplight;
+
+/** @brief A new map: its lights are gathered again (P_SetupLevel). */
+void dopo_maplight_clear(void);
+
+/**
+ * @brief A map thing of editor number type at (x, y), facing angle, with
+ * its Hexen-format args and height in hexen_thing_args/_height: true when
+ * it is a light (9800 and up), which spawns nothing.
+ */
+int dopo_maplight_add(int x, int y, int angle, int type);
+
 /** @brief The most lights a frame keeps (the nearest). */
 #define DOPO_LIGHTS_MAX 8
 

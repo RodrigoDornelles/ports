@@ -67,7 +67,7 @@ void dopo_widescreen_options(void)
 
    for (i = 0; option_defs_us[i].key; i++)
    {
-      if (count + 9 > sizeof(defs) / sizeof(*defs))
+      if (count + 10 > sizeof(defs) / sizeof(*defs))
          return;
       if (!strcmp(option_defs_us[i].key, "prboom-resolution"))
       {
@@ -88,6 +88,7 @@ void dopo_widescreen_options(void)
          defs[count++] = dopo_scale_option;
          defs[count++] = dopo_glow_option;
          defs[count++] = dopo_dynlight_option;
+         defs[count++] = dopo_maplight_option;
          defs[count++] = option_defs_us[i];
          defs[count++] = dopo_frameskip_option;
       }
