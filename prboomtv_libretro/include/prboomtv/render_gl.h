@@ -50,6 +50,19 @@ static inline uint16_t dopo_gl_fuzz16(uint16_t col1, uint16_t col2)
 /** @brief The prboom-render core option. */
 extern const struct retro_core_option_v2_definition dopo_gl_option;
 
+/** @brief The prboom-spectre core option (gl only): how fuzzy things look. */
+extern const struct retro_core_option_v2_definition dopo_gl_spectre_option;
+
+/** @brief The prboom-spectre-opacity core option (gl only): how strong. */
+extern const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option;
+
+/** @brief Reads prboom-spectre and prboom-spectre-opacity (startup and
+ * every change). */
+void dopo_gl_spectre_read(retro_environment_t environ_cb);
+
+/** @brief (see above) */
+extern const struct retro_core_option_v2_definition dopo_gl_option;
+
 /**
  * @brief Texture number + 1 of the wall or sky columns being emitted into
  * the draw records (r_drawcmd.c), 0 when they come from something the GPU
@@ -109,12 +122,14 @@ dbool dopo_gl_span(const draw_span_vars_t *ds, int lump);
  * @brief A sprite (lump of its patch, texnum -1) or a two-sided masked
  * texture (texnum, lump -1) is about to be drawn post by post through
  * R_DrawMaskedColumn; plain says it is opaque, without brightmap, tint or
- * sloped edges; x1..x2 its columns. True when the GPU takes its posts
+ * sloped edges; fuzz that it is a Spectre-like shadow, drawn in the
+ * prboom-spectre look; x1..x2 its columns. True when the GPU takes its posts
  * (dopo_gl_masked_post),
  * so the caller must use the R_DrawMaskedColumn path for every column.
  */
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
-                           R_DrawColumn_f colfunc, dbool plain, int x1, int x2);
+                           R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
+                           int x1, int x2);
 
 /** @brief The masked draw started by dopo_gl_masked_begin is done. */
 void dopo_gl_masked_end(void);

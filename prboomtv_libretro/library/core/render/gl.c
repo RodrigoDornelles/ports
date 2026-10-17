@@ -54,6 +54,62 @@
 extern int firstcolormaplump;
 
 dbool dopo_gl = FALSE;
+
+const struct retro_core_option_v2_definition dopo_gl_spectre_option =
+{
+   "prboom-spectre",
+   "Spectre Look (gl only)",
+   NULL,
+   "How the GPU draws the Spectre and other fuzzy things, as strong as "
+   "Spectre Strength says; only with the gl renderer (software keeps the "
+   "original fuzz). 'darken' darkens what is behind it, closest to the "
+   "original without its shimmer; 'subtract' takes the demon's colours "
+   "away from what is behind, a dark negative like the Nightmare Spectre "
+   "of the PlayStation and Doom 64; 'multiply' tints what is behind with "
+   "the demon's colours, like stained glass; 'translucent' shows the demon "
+   "faintly over it, like PlayStation Doom.",
+   NULL,
+   NULL,
+   {
+      { "darken",      "Darken" },
+      { "subtract",    "Subtract (negative)" },
+      { "multiply",    "Multiply (stained glass)" },
+      { "translucent", "Translucent" },
+      { NULL, NULL },
+   },
+   "darken"
+};
+
+enum
+{
+   GL_SPECTRE_DARKEN, GL_SPECTRE_SUBTRACT, GL_SPECTRE_MULTIPLY,
+   GL_SPECTRE_TRANSLUCENT
+};
+static int   gl_spectre = GL_SPECTRE_DARKEN;
+static float gl_spectre_opacity = 0.3f;
+
+/* each look at the strength it reads best at (prboom-spectre-opacity auto) */
+static const float gl_spectre_auto[] = { 0.3f, 0.2f, 0.5f, 0.2f };
+
+const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
+{
+   "prboom-spectre-opacity",
+   "Spectre Strength (gl only)",
+   NULL,
+   "How strong the Spectre Look is, from barely there to its full effect; "
+   "only with the gl renderer. 'auto' takes each look at the strength it "
+   "reads best at: darken 30%, subtract 20%, multiply 50%, translucent 20%.",
+   NULL,
+   NULL,
+   {
+      { "auto", "Auto" },
+      { "10", "10%" }, { "20", "20%" }, { "30", "30%" }, { "40", "40%" },
+      { "50", "50%" }, { "60", "60%" }, { "70", "70%" }, { "80", "80%" },
+      { "90", "90%" }, { "100", "100%" },
+      { NULL, NULL },
+   },
+   "auto"
+};
 int R_DrawCmdTexture = 0;
 int R_SpanTexture = 0;
 
@@ -120,8 +176,14 @@ typedef unsigned int  GLbitfield;
 #define GL_STENCIL_TEST           0x0B90
 #define GL_SCISSOR_TEST           0x0C11
 #define GL_BLEND                  0x0BE2
+#define GL_ZERO                   0
 #define GL_ONE                    1
+#define GL_SRC_COLOR              0x0300
 #define GL_SRC_ALPHA              0x0302
+#define GL_ONE_MINUS_SRC_ALPHA    0x0303
+#define GL_DST_COLOR              0x0306
+#define GL_FUNC_ADD               0x8006
+#define GL_FUNC_REVERSE_SUBTRACT  0x800B
 #define GL_CULL_FACE              0x0B44
 #define GL_DITHER                 0x0BD0
 #define GL_UNPACK_ALIGNMENT       0x0CF5
@@ -136,6 +198,8 @@ GLFN(void, glClear, (GLbitfield));
 GLFN(void, glDisable, (GLenum));
 GLFN(void, glEnable, (GLenum));
 GLFN(void, glBlendFunc, (GLenum, GLenum));
+GLFN(void, glBlendEquation, (GLenum));
+GLFN(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat));
 GLFN(void, glColorMask, (GLboolean, GLboolean, GLboolean, GLboolean));
 GLFN(void, glBindFramebuffer, (GLenum, GLuint));
 GLFN(void, glGenTextures, (GLsizei, GLuint *));
@@ -231,6 +295,7 @@ typedef struct
 {
    glvert_t *v;
    gltex_t **tex;
+   uint8_t  *fuzz;   /* a post of a fuzzy thing (prboom-spectre) */
    int       n, cap;
 } glquads_t;
 
@@ -292,6 +357,7 @@ static dbool           zlight_valid = FALSE;
  * CPU draws them */
 static gltex_t        *masked_tex = NULL;
 static const rpatch_t *masked_patch = NULL;
+static dbool           masked_fuzz = FALSE;
 
 /* The view of the software frame stays filled with the key between
  * frames: only the rows something drew on (the HUD, a menu, what the GPU
@@ -353,6 +419,9 @@ static int             cmap_lumprows[64];
 
 /* programs and buffers */
 static GLuint          wall_program = 0, frame_program = 0, plane_program = 0;
+static GLuint          fuzz_program = 0;
+static GLint           fuzz_u_scale, fuzz_u_offset, fuzz_u_tex, fuzz_u_cmap;
+static GLint           fuzz_u_mul, fuzz_u_add;
 static GLint           wall_u_scale, wall_u_offset, wall_u_tex, wall_u_cmap;
 static GLint           plane_u_scale, plane_u_offset, plane_u_tex, plane_u_cmap;
 static GLint           plane_u_zlight, plane_u_rows;
@@ -426,7 +495,7 @@ static dbool gl_load_functions(void)
    if (!(*(void **)&name = gl_proc(#name))) \
    { lprintf(LO_ERROR, "prboom-render gl: missing %s\n", #name); ok = FALSE; }
    LOAD(glViewport) LOAD(glClearColor) LOAD(glClear) LOAD(glDisable)
-   LOAD(glEnable) LOAD(glBlendFunc)
+   LOAD(glEnable) LOAD(glBlendFunc) LOAD(glBlendEquation) LOAD(glUniform4f)
    LOAD(glColorMask) LOAD(glBindFramebuffer) LOAD(glGenTextures)
    LOAD(glDeleteTextures) LOAD(glBindTexture) LOAD(glActiveTexture)
    LOAD(glTexParameteri) LOAD(glTexImage2D) LOAD(glTexSubImage2D)
@@ -562,6 +631,23 @@ static void gl_texture_params(GLint wrap)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
 }
 
+/* a fuzzy thing's post (prboom-spectre): the column's colour scaled and
+ * offset for the blend of the chosen look */
+static const char *fuzz_fs =
+   "#version 100\n"
+   "precision mediump float;\n"
+   "uniform sampler2D u_tex;\n"
+   "uniform sampler2D u_cmap;\n"
+   "uniform vec4 u_mul;\n"
+   "uniform vec4 u_add;\n"
+   "varying vec2 v_uv;\n"
+   "varying float v_light;\n"
+   "void main() {\n"
+   "  float index = texture2D(u_tex, v_uv).r;\n"
+   "  vec4 c = texture2D(u_cmap, vec2(index * (255.0 / 256.0) + (0.5 / 256.0), v_light));\n"
+   "  gl_FragColor = c * u_mul + u_add;\n"
+   "}\n";
+
 /* Floors and ceilings in rectangles: rows of one plane with the same left
  * and right ends drawn as one quad. The floor's texture mapping is
  * projective on the screen, so with each corner's distance as the clip w
@@ -624,7 +710,7 @@ static void gl_forget_objects(void)
       patchcache[i].id = 0;
    cmap_tex = 0;
    cmap_palette = NULL;
-   wall_program = frame_program = plane_program = 0;
+   wall_program = frame_program = plane_program = fuzz_program = 0;
    plane_vbo = zlight_tex = 0;
    zlight_valid = FALSE;
    vbo = ibo = frame_vbo = 0;
@@ -663,8 +749,15 @@ static void gl_context_reset(void)
    {
       static const char *const plane_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb" };
       plane_program = gl_program(plane_vs, plane_fs, plane_attribs, 5);
-      if (!plane_program)
+      fuzz_program = gl_program(wall_vs, fuzz_fs, wall_attribs, 3);
+      if (!plane_program || !fuzz_program)
          return;
+      fuzz_u_scale  = glGetUniformLocation(fuzz_program, "u_scale");
+      fuzz_u_offset = glGetUniformLocation(fuzz_program, "u_offset");
+      fuzz_u_tex    = glGetUniformLocation(fuzz_program, "u_tex");
+      fuzz_u_cmap   = glGetUniformLocation(fuzz_program, "u_cmap");
+      fuzz_u_mul    = glGetUniformLocation(fuzz_program, "u_mul");
+      fuzz_u_add    = glGetUniformLocation(fuzz_program, "u_add");
       plane_u_scale  = glGetUniformLocation(plane_program, "u_scale");
       plane_u_offset = glGetUniformLocation(plane_program, "u_offset");
       plane_u_tex    = glGetUniformLocation(plane_program, "u_tex");
@@ -725,6 +818,7 @@ static void gl_context_destroy(void)
       glDeleteProgram(wall_program);
       glDeleteProgram(frame_program);
       glDeleteProgram(plane_program);
+      glDeleteProgram(fuzz_program);
       glDeleteBuffers(1, &plane_vbo);
       glDeleteTextures(1, &zlight_tex);
    }
@@ -1197,9 +1291,16 @@ static glvert_t *gl_quad_in(glquads_t *l, gltex_t *tex)
       if (!t)
          return NULL;
       l->tex = t;
+      {
+         uint8_t *f = (uint8_t *)realloc(l->fuzz, cap);
+         if (!f)
+            return NULL;
+         l->fuzz = f;
+      }
       l->cap = cap;
    }
    l->tex[l->n] = tex;
+   l->fuzz[l->n] = 0;
    return &l->v[4 * l->n++];
 }
 
@@ -1707,16 +1808,18 @@ static gltex_t *gl_patch(int lump, const rpatch_t *p)
 }
 
 dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
-                           R_DrawColumn_f colfunc, dbool plain, int x1, int x2)
+                           R_DrawColumn_f colfunc, dbool plain, dbool fuzz,
+                           int x1, int x2)
 {
    const int cls = R_WallColumnKernelClass(colfunc);
    gltex_t *t = NULL;
 
    masked_tex = NULL;
+   masked_fuzz = FALSE;
    if (!view_active || drawvars.short_topleft != view_topleft)
       return FALSE;
    stat_masked++;
-   if (plain && patch && (cls == 1 || cls == 2))
+   if (plain && patch && (cls == 1 || cls == 2 || fuzz))
    {
       if (lump >= 0)
          t = gl_patch(lump, patch);
@@ -1745,12 +1848,14 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
    }
    masked_tex   = t;
    masked_patch = patch;
+   masked_fuzz  = fuzz;
    return TRUE;
 }
 
 void dopo_gl_masked_end(void)
 {
    masked_tex = NULL;
+   masked_fuzz = FALSE;
 }
 
 /* A post, clipped by R_DrawMaskedColumn: pixel y samples frac(y) =
@@ -1775,7 +1880,9 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
       return FALSE;
    }
    off = dc->source - p->pixels;
-   row = R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
+   /* a fuzzy thing has no colormap: its own colours, full bright */
+   row = masked_fuzz ? gl_colormap_row(fullcolormap)
+       : R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
    if (off < 0 || off >= (ptrdiff_t)p->width * p->height || step <= 0 || row < 0
          || (q = gl_quad_in(&masked_q, t)) == NULL)
       return gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
@@ -1794,6 +1901,7 @@ dbool dopo_gl_masked_post(const draw_column_vars_t *dc, R_DrawColumn_f fn)
    q[2].s = q[3].s = s1;
    q[0].t = q[1].t = q[2].t = q[3].t = tc;
    q[0].l = q[1].l = q[2].l = q[3].l = lc;
+   masked_q.fuzz[masked_q.n - 1] = (uint8_t)masked_fuzz;
 
    /* over something the CPU drew, the post has to win: key under it */
    if (view_software)
@@ -1872,6 +1980,92 @@ static void gl_draw_range(GLuint tex, int first, int count)
    }
 }
 
+/* Into and out of a fuzzy thing's look (prboom-spectre). The blends only
+ * read what is behind inside the GPU's tile, so they cost nothing more;
+ * the frame's alpha stays the clear's. */
+static void gl_fuzz_state(unsigned width, unsigned height, int offset_x, dbool on)
+{
+   if (!on)
+   {
+      glDisable(GL_BLEND);
+      glBlendEquation(GL_FUNC_ADD);
+      glColorMask(1, 1, 1, 1);
+      glUseProgram(wall_program);
+      return;
+   }
+   glUseProgram(fuzz_program);
+   glUniform2f(fuzz_u_scale, 2.0f / width, 2.0f / height);
+   glUniform2f(fuzz_u_offset, (float)offset_x, 0.0f);
+   glUniform1i(fuzz_u_tex, 0);
+   glUniform1i(fuzz_u_cmap, 1);
+   glEnable(GL_BLEND);
+   glColorMask(1, 1, 1, 0);
+   /* every look goes from nothing (strength 0) to its full effect (1) */
+   {
+      const float k = gl_spectre_opacity;
+      switch (gl_spectre)
+      {
+      case GL_SPECTRE_MULTIPLY:
+         /* behind x mix(1, the demon's colours, k) */
+         glUniform4f(fuzz_u_mul, k, k, k, 1);
+         glUniform4f(fuzz_u_add, 1 - k, 1 - k, 1 - k, 0);
+         glBlendEquation(GL_FUNC_ADD);
+         glBlendFunc(GL_DST_COLOR, GL_ZERO);
+         break;
+      case GL_SPECTRE_DARKEN:
+         /* behind x (1 - k) */
+         glUniform4f(fuzz_u_mul, 0, 0, 0, 0);
+         glUniform4f(fuzz_u_add, 1 - k, 1 - k, 1 - k, 1);
+         glBlendEquation(GL_FUNC_ADD);
+         glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+         break;
+      case GL_SPECTRE_TRANSLUCENT:
+         /* the demon at opacity k */
+         glUniform4f(fuzz_u_mul, 1, 1, 1, 0);
+         glUniform4f(fuzz_u_add, 0, 0, 0, k);
+         glBlendEquation(GL_FUNC_ADD);
+         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+         break;
+      case GL_SPECTRE_SUBTRACT:
+         /* behind minus the demon's colours x k */
+         glUniform4f(fuzz_u_mul, k, k, k, 0);
+         glUniform4f(fuzz_u_add, 0, 0, 0, 0);
+         glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+         glBlendFunc(GL_ONE, GL_ONE);
+         break;
+      default:
+         /* behind x (1 - k) */
+         glUniform4f(fuzz_u_mul, 0, 0, 0, 0);
+         glUniform4f(fuzz_u_add, 1 - k, 1 - k, 1 - k, 1);
+         glBlendEquation(GL_FUNC_ADD);
+         glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+         break;
+      }
+   }
+}
+
+void dopo_gl_spectre_read(retro_environment_t environ_cb)
+{
+   struct retro_variable var = { "prboom-spectre", NULL };
+   struct retro_variable opacity = { "prboom-spectre-opacity", NULL };
+   int percent = 0;
+
+   gl_spectre = GL_SPECTRE_DARKEN;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "subtract"))
+         gl_spectre = GL_SPECTRE_SUBTRACT;
+      else if (!strcmp(var.value, "multiply"))
+         gl_spectre = GL_SPECTRE_MULTIPLY;
+      else if (!strcmp(var.value, "translucent"))
+         gl_spectre = GL_SPECTRE_TRANSLUCENT;
+   }
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &opacity) && opacity.value)
+      percent = atoi(opacity.value);
+   gl_spectre_opacity = percent > 0 && percent <= 100
+                      ? percent / 100.0f : gl_spectre_auto[gl_spectre];
+}
+
 static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
 {
    int i;
@@ -1906,9 +2100,17 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
    for (i = 0; i < masked_q.n; )
    {
       int j = i + 1;
-      while (j < masked_q.n && masked_q.tex[j] == masked_q.tex[i])
+      while (j < masked_q.n && masked_q.tex[j] == masked_q.tex[i]
+             && masked_q.fuzz[j] == masked_q.fuzz[i])
          j++;
-      gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
+      if (masked_q.fuzz[i])
+      {
+         gl_fuzz_state(width, height, offset_x, TRUE);
+         gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
+         gl_fuzz_state(width, height, offset_x, FALSE);
+      }
+      else
+         gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
       i = j;
    }
    glDisableVertexAttribArray(1);
