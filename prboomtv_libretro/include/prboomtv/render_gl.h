@@ -61,7 +61,8 @@ extern const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_opti
 void dopo_gl_spectre_read(retro_environment_t environ_cb);
 
 /** @brief The prboom-scale core option (gl only): sprites and 2D patches
- * at twice their size through Scale2x (0 off, 1 the contour, 2 all). */
+ * at twice their size through Scale2x (0 off, 1 the contour, 2 all, 3 all
+ * and then the contour again, at four times). */
 extern const struct retro_core_option_v2_definition dopo_gl_scale_option;
 
 /** @brief Reads prboom-scale (startup and every change). */

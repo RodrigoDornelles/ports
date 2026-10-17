@@ -114,7 +114,8 @@ const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
 };
 
 /* prboom-scale: sprites and 2D patches sent at twice their size, through
- * Scale2x; 1 takes only the contour from it, 2 everything */
+ * Scale2x; 1 takes only the contour from it, 2 everything, 3 everything
+ * and then the contour again (four times the size) */
 const struct retro_core_option_v2_definition dopo_gl_scale_option =
 {
    "prboom-scale",
@@ -124,13 +125,16 @@ const struct retro_core_option_v2_definition dopo_gl_scale_option =
    "HUD, menus) at twice their size, smoothed with Scale2x, a filter that "
    "only reuses the original pixels; only with the gl renderer. 'contour' "
    "rounds off the outline and keeps the inside as it was; 'full' smooths "
-   "the inside too, where neighbouring pixels share a colour.",
+   "the inside too, where neighbouring pixels share a colour; 'full + 4x "
+   "contour' then rounds the outline once more, at four times the size "
+   "(four times the texture memory of 'full', for PCs).",
    NULL,
    NULL,
    {
       { "0", "Off" },
       { "1", "Contour" },
       { "2", "Full" },
+      { "3", "Full + 4x Contour" },
       { NULL, NULL },
    },
    "2"
@@ -974,13 +978,14 @@ static void gl_scale2x(const uint16_t *src, uint16_t *dst, int w, int h, dbool c
 }
 
 /* A patch with its coverage, index and alpha, column x along GL row x;
- * with prboom-scale at twice its size through Scale2x. */
+ * with prboom-scale at twice its size through Scale2x, at 3 four times
+ * (Scale2x again, the contour only). */
 static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
 {
-   const int k = scale ? 2 : 1;
+   const int k = scale == 3 ? 4 : scale ? 2 : 1;
    const int rows = gl_pot(p->height), cols = gl_pot(p->width);
    const int w = p->height, h = p->width;   /* along GL rows: a column */
-   uint16_t *src = NULL, *big = NULL;
+   uint16_t *src = NULL, *big = NULL, *mid = NULL;
    uint8_t *buf;
    int x, y, i;
 
@@ -991,12 +996,15 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
    buf = (uint8_t *)calloc((size_t)rows * cols * k * k, 2);
    src = (uint16_t *)malloc(sizeof(uint16_t) * w * h);
    if (k > 1)
-      big = (uint16_t *)malloc(sizeof(uint16_t) * w * h * 4);
-   if (!buf || !src || (k > 1 && !big))
+      big = (uint16_t *)malloc(sizeof(uint16_t) * w * h * k * k);
+   if (k > 2)
+      mid = (uint16_t *)malloc(sizeof(uint16_t) * w * h * 4);
+   if (!buf || !src || (k > 1 && !big) || (k > 2 && !mid))
    {
       free(buf);
       free(src);
       free(big);
+      free(mid);
       return;
    }
    for (i = 0; i < w * h; i++)
@@ -1011,7 +1019,12 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
             src[x * w + y] = column->pixels[y];
       }
    }
-   if (k > 1)
+   if (k > 2)
+   {
+      gl_scale2x(src, mid, w, h, FALSE);
+      gl_scale2x(mid, big, w * 2, h * 2, TRUE);
+   }
+   else if (k > 1)
       gl_scale2x(src, big, w, h, scale == 1);
    for (x = 0; x < h * k; x++)
       for (y = 0; y < w * k; y++)
@@ -1033,6 +1046,7 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
    free(buf);
    free(src);
    free(big);
+   free(mid);
    t->gl_width  = rows;
    t->gl_height = cols;
    t->bad = FALSE;
@@ -1955,8 +1969,8 @@ static int gl_masked_row(const draw_column_vars_t *dc, R_DrawColumn_f fn)
 }
 
 /* A sprite column over a texture with coverage (prboom-scale): one quad
- * from a texel above its first post to a texel below its last (Scale2x
- * can cover half of those), clipped like the posts; the texture's
+ * from two texels above its first post to two below its last (each
+ * Scale2x pass can reach a little past the posts), clipped like the posts; the texture's
  * coverage draws the outline. Pixel y samples frac(y) = texturemid +
  * (y - centery) * iscale from the patch's top, column texu (16.16) picks
  * one of the two texture columns of each patch column. */
@@ -1973,9 +1987,9 @@ void dopo_gl_masked_column(const rpatch_t *patch, const draw_column_vars_t *dc,
 
    if (!t || !t->alpha || !column->numPosts || step <= 0)
       return;
-   t0 = column->posts[0].topdelta - 1;
+   t0 = column->posts[0].topdelta - 2;
    t1 = column->posts[column->numPosts - 1].topdelta
-      + column->posts[column->numPosts - 1].length + 1;
+      + column->posts[column->numPosts - 1].length + 2;
    if (t0 < 0)
       t0 = 0;
    if (t1 > patch->height)
@@ -2677,7 +2691,8 @@ void dopo_gl_scale_read(retro_environment_t environ_cb)
 
    gl_scale = 2;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
-         && (!strcmp(var.value, "0") || !strcmp(var.value, "1")))
+         && (!strcmp(var.value, "0") || !strcmp(var.value, "1")
+             || !strcmp(var.value, "3")))
       gl_scale = var.value[0] - '0';
 }
 
