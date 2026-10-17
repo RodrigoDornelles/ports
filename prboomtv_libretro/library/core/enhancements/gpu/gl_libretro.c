@@ -6,10 +6,10 @@
  */
 
 /** @patch libretro/libretro.c 64 */
-#include "prboomtv/render_gl.h"
-#include "prboomtv/scale2x.h"
-#include "prboomtv/glow.h"
-#include "prboomtv/dynlights.h"
+#include "prboomtv/gpu/render_gl.h"
+#include "prboomtv/gpu/scale2x.h"
+#include "prboomtv/gpu/glow.h"
+#include "prboomtv/gpu/dynlights.h"
 /* @endpatch */
 
 /**

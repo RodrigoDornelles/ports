@@ -48,11 +48,12 @@
 #include "v_video.h"
 #include "vid_mode.h"
 #include "w_wad.h"
-#include "prboomtv/render_gl.h"
-#include "prboomtv/scale2x.h"
-#include "prboomtv/glow.h"
-#include "prboomtv/dynlights.h"
-#include "prboomtv/shaders.h"
+#include "prboomtv/gpu/render_gl.h"
+#include "prboomtv/gpu/scale2x.h"
+#include "prboomtv/gpu/glow.h"
+#include "prboomtv/gpu/dynlights.h"
+#include "prboomtv/gpu/brightmaps.h"
+#include "prboomtv/gpu/shaders.h"
 #include "prboomtv/widescreen.h"
 
 /* r_data.c, killough's marker lumps of the extra colormaps */
@@ -118,6 +119,8 @@ const struct retro_core_option_v2_definition dopo_gl_spectre_opacity_option =
 
 /* the prboom-scale (scale2x.c) the patch textures were made with */
 static int   patchcache_scale = 0;
+/* whether the textures were made with their brightmaps (prboom-dynlight) */
+static int   texcache_bright = -1;
 static int   gl2d_patches_scale = 0;
 int R_DrawCmdTexture = 0;
 const seg_t *R_DrawCmdSeg = NULL;
@@ -295,6 +298,10 @@ typedef struct
    const rpatch_t *patch;
    dbool          bad;                  /* too big for the GPU */
    dbool          alpha;                /* index and coverage, prboom-scale */
+   dbool          bright;               /* a brightmap in the alpha (a half) */
+   int            bm_n;                 /* its strongest texels: how many, */
+   float          bm_cx, bm_cy;         /* where (patch texels), */
+   uint32_t       bm_rgb;               /* their colour (a corona there) */
    dbool          glow_valid;           /* glow_rgb is known */
    uint32_t       glow_rgb;             /* a sprite's corona colour */
    int            count, first;         /* quads this frame, while sorting */
@@ -519,11 +526,16 @@ static GLuint          wlit_program = 0, plit_program = 0, slit_program = 0;
 static GLuint          litw_vbo = 0, litp_vbo = 0;
 typedef struct
 {
-   GLint scale, offset, tex, cmap, zlight, rows, lpos, lcol, lcount, full, light;
+   GLint scale, offset, tex, cmap, zlight, rows, lpos, lcol, lcount, full, light, bright;
 } gllit_u_t;
 static gllit_u_t       wlit_u, plit_u, slit_u;
 static GLint           corona_u_scale, corona_u_offset, corona_u_tex, corona_u_color;
-static GLint           sprite_u_scale, sprite_u_offset, sprite_u_tex, sprite_u_cmap;
+static GLint           sprite_u_scale, sprite_u_offset, sprite_u_tex, sprite_u_cmap, sprite_u_bright;
+/* the programs for textures and flats with a brightmap */
+static GLuint          wallbm_program = 0, planebm_program = 0;
+static GLint           wallbm_u_scale, wallbm_u_offset, wallbm_u_tex, wallbm_u_cmap, wallbm_u_bright;
+static GLint           planebm_u_scale, planebm_u_offset, planebm_u_tex, planebm_u_cmap;
+static GLint           planebm_u_zlight, planebm_u_rows, planebm_u_bright;
 static GLuint          two_program = 0, copy_program = 0;
 static GLint           two_u_scale, two_u_offset, two_u_tex, two_u_trans, two_u_pal;
 static GLint           copy_u_scale, copy_u_offset, copy_u_tex;
@@ -626,7 +638,7 @@ static dbool gl_load_functions(void)
 
 /* ---- shaders ---- */
 
-/* the shaders are in shaders/, embedded into prboomtv/shaders.h by
+/* the shaders are in shaders/, embedded into prboomtv/gpu/shaders.h by
  * dopo/scripts/xxd.cpp at build time */
 #define GL_SHADER(name) ((const char *)(name))
 
@@ -701,6 +713,7 @@ static void gl_forget_objects(void)
    cmap_tex = 0;
    cmap_palette = NULL;
    wall_program = frame_program = plane_program = fuzz_program = sprite_program = 0;
+   wallbm_program = planebm_program = 0;
    corona_program = 0;
    corona_tex.id = 0;
    wlit_program = plit_program = slit_program = 0;
@@ -730,6 +743,7 @@ static void gl_lit_uniforms(gllit_u_t *u, GLuint prog)
    u->lcount = glGetUniformLocation(prog, "u_lcount");
    u->full   = glGetUniformLocation(prog, "u_full");
    u->light  = glGetUniformLocation(prog, "u_light");
+   u->bright = glGetUniformLocation(prog, "u_bm");
 }
 
 static void gl_context_reset(void)
@@ -828,6 +842,24 @@ static void gl_context_reset(void)
       sprite_u_offset = glGetUniformLocation(sprite_program, "u_offset");
       sprite_u_tex    = glGetUniformLocation(sprite_program, "u_tex");
       sprite_u_cmap   = glGetUniformLocation(sprite_program, "u_cmap");
+      sprite_u_bright = glGetUniformLocation(sprite_program, "u_bm");
+      {
+         static const char *const plane_attribs2[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb" };
+         wallbm_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_wall_bm), wall_attribs, 3);
+         planebm_program = gl_program(GL_SHADER(vert_plane), GL_SHADER(frag_plane_bm), plane_attribs2, 5);
+         wallbm_u_scale   = glGetUniformLocation(wallbm_program, "u_scale");
+         wallbm_u_offset  = glGetUniformLocation(wallbm_program, "u_offset");
+         wallbm_u_tex     = glGetUniformLocation(wallbm_program, "u_tex");
+         wallbm_u_cmap    = glGetUniformLocation(wallbm_program, "u_cmap");
+         wallbm_u_bright  = glGetUniformLocation(wallbm_program, "u_bm");
+         planebm_u_scale  = glGetUniformLocation(planebm_program, "u_scale");
+         planebm_u_offset = glGetUniformLocation(planebm_program, "u_offset");
+         planebm_u_tex    = glGetUniformLocation(planebm_program, "u_tex");
+         planebm_u_cmap   = glGetUniformLocation(planebm_program, "u_cmap");
+         planebm_u_zlight = glGetUniformLocation(planebm_program, "u_zlight");
+         planebm_u_rows   = glGetUniformLocation(planebm_program, "u_rows");
+         planebm_u_bright = glGetUniformLocation(planebm_program, "u_bm");
+      }
       fuzz_u_scale  = glGetUniformLocation(fuzz_program, "u_scale");
       fuzz_u_offset = glGetUniformLocation(fuzz_program, "u_offset");
       fuzz_u_tex    = glGetUniformLocation(fuzz_program, "u_tex");
@@ -896,6 +928,8 @@ static void gl_context_destroy(void)
       glDeleteProgram(plane_program);
       glDeleteProgram(fuzz_program);
       glDeleteProgram(sprite_program);
+      glDeleteProgram(wallbm_program);
+      glDeleteProgram(planebm_program);
       glDeleteProgram(corona_program);
       glDeleteProgram(wlit_program);
       glDeleteProgram(plit_program);
@@ -987,6 +1021,18 @@ static void gl_cache_reset(gltex_t **cache, int *n, int size)
 /* a new set of wads numbers the textures and the lumps anew */
 static void gl_texcache_check(void)
 {
+   const int bright = dopo_dynlight != 0;
+   if (texcache_bright != bright)
+   {
+      /* every texture again, with or without its brightmap */
+      gl_cache_reset(&texcache, &texcache_n, numtextures);
+      gl_cache_reset(&flatcache, &flatcache_n, numlumps);
+      gl_cache_reset(&patchcache, &patchcache_n, numlumps);
+      texcache_owner = textures;
+      flatcache_owner = patchcache_owner = lumpinfo;
+      patchcache_scale = dopo_scale;
+      texcache_bright = bright;
+   }
    if (texcache_owner != textures || texcache_n != numtextures)
    {
       gl_cache_reset(&texcache, &texcache_n, numtextures);
@@ -1010,7 +1056,7 @@ static void gl_texcache_check(void)
 static gltex_t *gl_flat(int lump)
 {
    gltex_t *t;
-   const uint8_t *data;
+   const uint8_t *data, *bright;
    uint8_t buf[64 * 64];
    int len;
 
@@ -1028,46 +1074,80 @@ static gltex_t *gl_flat(int lump)
    glBindTexture(GL_TEXTURE_2D, t->id);
    gl_texture_params(GL_REPEAT);
    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 64, 64, 0,
-                GL_LUMINANCE, GL_UNSIGNED_BYTE, buf);
+   bright = dopo_brightmask_flat(lump - firstflat);
+   if (bright)
+   {
+      /* the brightmap in the alpha, a half where bright (gl_alpha_upload) */
+      uint8_t ba[64 * 64 * 2];
+      int i;
+      for (i = 0; i < 64 * 64; i++)
+      {
+         ba[2 * i] = buf[i];
+         ba[2 * i + 1] = dopo_brightmask_alpha(bright[i]);
+      }
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, 64, 64, 0,
+                   GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, ba);
+   }
+   else
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 64, 64, 0,
+                   GL_LUMINANCE, GL_UNSIGNED_BYTE, buf);
    t->gl_width = t->gl_height = 64;
+   t->bright = bright != NULL;
    return t;
 }
 
-/* the composite, column major: column x is GL row x, its texels along s */
-static void gl_texture_upload(gltex_t *t, const rpatch_t *p)
+/* the composite, column major: column x is GL row x, its texels along s;
+ * with a brightmap (column major too, or NULL) the alpha marks it, a half
+ * for a bright texel (see gl_alpha_upload) */
+static void gl_texture_upload(gltex_t *t, const rpatch_t *p, const uint8_t *bright)
 {
    const int rows = gl_pot(p->height), cols = gl_pot(p->width);
+   const int bpp = bright ? 2 : 1;
    uint8_t *buf;
-   int x;
+   int x, y;
 
    if (rows > max_texture_size || cols > max_texture_size)
    {
       t->bad = TRUE;
       return;
    }
-   buf = (uint8_t *)calloc((size_t)rows * cols, 1);
+   buf = (uint8_t *)calloc((size_t)rows * cols, bpp);
    if (!buf)
    {
       t->bad = TRUE;
       return;
    }
    for (x = 0; x < p->width; x++)
-      memcpy(buf + (size_t)x * rows, p->pixels + (size_t)x * p->height, p->height);
+   {
+      if (!bright)
+      {
+         memcpy(buf + (size_t)x * rows, p->pixels + (size_t)x * p->height, p->height);
+         continue;
+      }
+      for (y = 0; y < p->height; y++)
+      {
+         uint8_t *d = buf + ((size_t)x * rows + y) * 2;
+         d[0] = p->pixels[(size_t)x * p->height + y];
+         d[1] = dopo_brightmask_alpha(bright[(size_t)x * p->height + y]);
+      }
+   }
    glGenTextures(1, &t->id);
    glBindTexture(GL_TEXTURE_2D, t->id);
    gl_texture_params(GL_REPEAT);
    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, rows, cols, 0,
-                GL_LUMINANCE, GL_UNSIGNED_BYTE, buf);
+   glTexImage2D(GL_TEXTURE_2D, 0, bright ? GL_LUMINANCE_ALPHA : GL_LUMINANCE, rows, cols, 0,
+                bright ? GL_LUMINANCE_ALPHA : GL_LUMINANCE, GL_UNSIGNED_BYTE, buf);
    free(buf);
    t->gl_width  = rows;
    t->gl_height = cols;
+   t->bright = bright != NULL;
 }
 
 /* A patch with its coverage, index and alpha, column x along GL row x;
- * with prboom-scale bigger through Scale2x (scale2x.c). */
-static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
+ * with prboom-scale bigger through Scale2x (scale2x.c). The alpha: 0
+ * transparent, 255 opaque, 1..127 opaque and at least that bright, the
+ * level of a brightmap (bright, column major, or NULL; brightmaps.h). */
+static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale, const uint8_t *bright)
 {
    const int rows = gl_pot(p->height), cols = gl_pot(p->width);
    uint16_t *img;
@@ -1076,7 +1156,8 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
 
    t->bad = TRUE;
    t->alpha = TRUE;
-   img = dopo_scale_image(p, scale, &k);
+   img = dopo_scale_image(p, bright, scale, &k);
+   t->bright = bright != NULL;
    if (!img)
       return;
    if (rows * k > max_texture_size || cols * k > max_texture_size
@@ -1093,7 +1174,7 @@ static void gl_alpha_upload(gltex_t *t, const rpatch_t *p, int scale)
          {
             uint8_t *d = buf + ((size_t)x * rows * k + y) * 2;
             d[0] = (uint8_t)c;
-            d[1] = 255;
+            d[1] = DOPO_SCALE_LEVEL(c) ? (uint8_t)DOPO_SCALE_LEVEL(c) : 255;
          }
       }
    free(img);
@@ -1124,7 +1205,7 @@ static gltex_t *gl_texture(int texnum)
       R_DrawCmdAdoptTextureLock(texnum);
       t->stamp = replay_stamp;
       if (!t->id && !t->bad)
-         gl_texture_upload(t, t->patch);
+         gl_texture_upload(t, t->patch, dopo_brightmask_texture(texnum));
    }
    return t->bad ? NULL : t;
 }
@@ -1630,10 +1711,13 @@ static void gl_plane_lit(const glpvert_t *q, const double w[2])
    }
 }
 
-/* the sum of the lights at a sprite's middle, 0xRRGGBB (0: none) */
+/* The sum of the lights at a sprite's middle, 0xRRGGBB (0: none). A
+ * sprite always faces the eye, so a light between it and the eye lights
+ * the side that shows, and one behind it barely its edges: a monster
+ * shooting away from the eye stands dark against what its flash lights. */
 static uint32_t gl_sprite_lit(const vissprite_t *vis)
 {
-   double px, py, pz, r = 0, g = 0, b = 0;
+   double px, py, pz, r = 0, g = 0, b = 0, eye;
    int i;
    if (vis->mobjflags & MF_PLAYERSPRITE)
    {
@@ -1646,17 +1730,25 @@ static uint32_t gl_sprite_lit(const vissprite_t *vis)
       py = (vis->gy - viewy) / 65536.0;
       pz = ((vis->gz / 2 + vis->gzt / 2) - viewz) / 65536.0;
    }
+   eye = sqrt(px * px + py * py + pz * pz);
    for (i = 0; i < gl_dyn_n; i++)
    {
       const dopo_light_t *l = &gl_dyn[i];
       const double dx = l->x - px, dy = l->y - py, dz = l->z - pz;
-      const double att = 1.0 - sqrt(dx * dx + dy * dy + dz * dz) / l->radius;
-      if (att > 0)
+      const double dist = sqrt(dx * dx + dy * dy + dz * dz);
+      double att = 1.0 - dist / l->radius;
+      if (att <= 0)
+         continue;
+      if (eye > 1 && dist > 1 && !(vis->mobjflags & MF_PLAYERSPRITE))
       {
-         r += l->r * att;
-         g += l->g * att;
-         b += l->b * att;
+         /* toward the eye: full; aside: a quarter; behind: none */
+         const double facing = -(dx * px + dy * py + dz * pz) / (dist * eye);
+         const double side = 0.25 + 0.75 * facing;
+         att *= side < 0 ? 0 : side > 1 ? 1 : side;
       }
+      r += l->r * att;
+      g += l->g * att;
+      b += l->b * att;
    }
    if (r + g + b < 0.02)
       return 0;
@@ -1664,6 +1756,15 @@ static uint32_t gl_sprite_lit(const vissprite_t *vis)
    g = g > 1 ? 255 : g * 255;
    b = b > 1 ? 255 : b * 255;
    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b | 0x01000000u;
+}
+
+/* a brightmap's texel takes the lighter of its row and the row of its
+ * level among the 32 light rows of the full bright COLORMAP: that row
+ * and the colour table's height (the shaders' u_bm) */
+static void gl_bright_uniform(GLint where)
+{
+   const int row = gl_colormap_row(fullcolormap);
+   glUniform2f(where, (float)(row < 0 ? 0 : row), (float)cmap_gl_rows);
 }
 
 /* a lit program's view, textures and lights */
@@ -1695,6 +1796,7 @@ static void gl_lit_set(const gllit_u_t *u, unsigned width, unsigned height, int 
    glUniform1i(u->lcount, gl_dyn_n);
    /* the palette alone: the texel at full brightness */
    glUniform1f(u->full, (cmap_rows - 1 + 0.5f) / cmap_gl_rows);
+   gl_bright_uniform(u->bright);
 }
 
 /* rows y0..y1-1 of column x, the texel row running from v0 at the top
@@ -1746,13 +1848,13 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex,
    if (dc->yl > dc->yh)
       return TRUE;
    stat_columns++;
-   if (!gltex || dc->brightmask || dc->tint || dc->drawingmasked)
+   if (!gltex || dc->tint || dc->drawingmasked)
    {
       stat_software++;
       return gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
    }
    t = gl_texture(gltex - 1);
-   if (!t)
+   if (!t || (dc->brightmask && !t->bright))
    {
       stat_software++;
       return gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
@@ -2030,8 +2132,9 @@ dbool dopo_gl_span(const draw_span_vars_t *ds, int lump)
    if (ds->x1 > ds->x2)
       return TRUE;
    stat_spans++;
-   if (!lump || ds->brightmask || r_span_translucent
+   if (!lump || r_span_translucent
          || (t = gl_flat(lump - 1)) == NULL
+         || (ds->brightmask && !t->bright)
          || (row = gl_colormap_row(ds->colormap)) < 0)
    {
       stat_spans_software++;
@@ -2167,6 +2270,18 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
    {
       gltex_t *t = plane_used[i];
       int start = t->first, count = t->count;
+      if (t->bright)
+      {
+         /* a flat with a brightmap */
+         glUseProgram(planebm_program);
+         glUniform2f(planebm_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(planebm_u_offset, (float)offset_x, 0.0f);
+         glUniform1i(planebm_u_tex, 0);
+         glUniform1i(planebm_u_cmap, 1);
+         glUniform1i(planebm_u_zlight, 2);
+         glUniform1f(planebm_u_rows, (float)cmap_gl_rows);
+         gl_bright_uniform(planebm_u_bright);
+      }
       glBindTexture(GL_TEXTURE_2D, t->id);
       while (count > 0)
       {
@@ -2183,6 +2298,8 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
          count -= chunk;
       }
       t->count = 0;
+      if (t->bright)
+         glUseProgram(plane_program);
    }
    for (i = 1; i < 5; i++)
       glDisableVertexAttribArray(i);
@@ -2193,6 +2310,53 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
 }
 
 /* ---- sprites and masked textures ---- */
+
+/* Where a sprite's brightmap is strongest (a muzzle flash, a flame): the
+ * middle of its texels at three quarters of full and above, how many and
+ * their colour through the game's palette, so the corona rises from
+ * there (prboom-glow 2). */
+static void gl_bright_spot(gltex_t *t, const rpatch_t *p, const uint8_t *mask)
+{
+   const uint8_t *pal = (const uint8_t *)W_CacheLumpName("PLAYPAL");
+   double sx = 0, sy = 0, r = 0, g = 0, b = 0, top;
+   int x, y, i, n = 0;
+
+   t->bm_n = 0;
+   if (!pal)
+      return;
+   for (x = 0; x < p->width; x++)
+      for (i = 0; i < p->columns[x].numPosts; i++)
+      {
+         const rpost_t *post = &p->columns[x].posts[i];
+         for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
+         {
+            const unsigned lv = mask[x * p->height + y] == 1 ? 255 : mask[x * p->height + y];
+            const uint8_t *c = pal + 3 * p->columns[x].pixels[y];
+            if (lv < 192)
+               continue;
+            sx += x + 0.5;
+            sy += y + 0.5;
+            r += c[0];
+            g += c[1];
+            b += c[2];
+            n++;
+         }
+      }
+   W_UnlockLumpName("PLAYPAL");
+   if (!n)
+      return;
+   r /= n;
+   g /= n;
+   b /= n;
+   top = r > g ? (r > b ? r : b) : (g > b ? g : b);
+   if (top <= 0)
+      return;
+   t->bm_n = n;
+   t->bm_cx = (float)(sx / n);
+   t->bm_cy = (float)(sy / n);
+   t->bm_rgb = ((uint32_t)(r * 255 / top) << 16) | ((uint32_t)(g * 255 / top) << 8)
+             | (uint32_t)(b * 255 / top);
+}
 
 /* the patch of a sprite lump, laid out like a composite (column x is GL
  * row x); its transparent texels are never drawn, only its posts, or with
@@ -2205,10 +2369,13 @@ static gltex_t *gl_patch(int lump, const rpatch_t *p)
    t = &patchcache[lump];
    if (!t->id && !t->bad)
    {
-      if (dopo_scale)
-         gl_alpha_upload(t, p, dopo_scale);
+      const uint8_t *bright = dopo_brightmask_sprite(lump - firstspritelump, p);
+      if (dopo_scale || bright)
+         gl_alpha_upload(t, p, dopo_scale, bright);
       else
-         gl_texture_upload(t, p);
+         gl_texture_upload(t, p, NULL);
+      if (bright && !t->bad)
+         gl_bright_spot(t, p, bright);
    }
    return t->bad ? NULL : t;
 }
@@ -2287,7 +2454,7 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
       {
          t = &texcache[texnum];
          if (!t->id && !t->bad)
-            gl_texture_upload(t, patch);
+            gl_texture_upload(t, patch, dopo_brightmask_texture(texnum));
          if (t->bad)
             t = NULL;
       }
@@ -2337,6 +2504,27 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
          masked_corona.y0  = cy - r;
          masked_corona.y1  = cy + r + 1;
          masked_corona.rgb = gl_corona_colour(t, patch);
+      }
+   }
+   /* or from the strongest of its brightmap (a muzzle flash, a flame), as
+    * big as that part, where it is on the screen */
+   else if (dopo_glow == 2 && vis && lump >= 0 && t->bm_n > 0 && !fuzz && vis->xiscale
+            && corona_tex.id)
+   {
+      const double scale = spryscale / 65536.0;
+      const int cx = vis->x1 + (int)((t->bm_cx * 65536.0 - vis->startfrac) / vis->xiscale);
+      const int cy = (int)((sprtopscreen + t->bm_cy * (double)spryscale) / 65536.0);
+      int r = (int)(sqrt((double)t->bm_n) * scale * 1.6) + 4;
+      if (r > 160)
+         r = 160;
+      if (cx >= 0 && cx < viewwidth && cy > mceilingclip[cx] && cy < mfloorclip[cx])
+      {
+         masked_corona.on  = TRUE;
+         masked_corona.x0  = cx - r;
+         masked_corona.x1  = cx + r + 1;
+         masked_corona.y0  = cy - r;
+         masked_corona.y1  = cy + r + 1;
+         masked_corona.rgb = t->bm_rgb;
       }
    }
    return TRUE;
@@ -2719,7 +2907,7 @@ static gltex_t *gl2d_patch(const rpatch_t *p)
       return t->bad ? NULL : t;
    gl2d_patches[h].key = p;
    memset(t, 0, sizeof(*t));
-   gl_alpha_upload(t, p, dopo_scale);
+   gl_alpha_upload(t, p, dopo_scale, NULL);
    return t->bad ? NULL : t;
 }
 
@@ -3246,7 +3434,20 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
    for (i = 0; i < used_n; i++)
    {
       gltex_t *t = used[i];
-      gl_draw_range(t->id, t->first, t->count);
+      if (t->bright)
+      {
+         /* a texture or flat with a brightmap */
+         glUseProgram(wallbm_program);
+         glUniform2f(wallbm_u_scale, 2.0f / width, 2.0f / height);
+         glUniform2f(wallbm_u_offset, (float)offset_x, 0.0f);
+         glUniform1i(wallbm_u_tex, 0);
+         glUniform1i(wallbm_u_cmap, 1);
+         gl_bright_uniform(wallbm_u_bright);
+         gl_draw_range(t->id, t->first, t->count);
+         glUseProgram(wall_program);
+      }
+      else
+         gl_draw_range(t->id, t->first, t->count);
       t->count = 0;
    }
    if (litw_n)
@@ -3308,6 +3509,7 @@ static void gl_draw_scene(unsigned width, unsigned height, int offset_x)
          glUniform2f(sprite_u_offset, (float)offset_x, 0.0f);
          glUniform1i(sprite_u_tex, 0);
          glUniform1i(sprite_u_cmap, 1);
+         gl_bright_uniform(sprite_u_bright);
          gl_draw_range(masked_q.tex[i]->id, solid_q.n + i, j - i);
          glUseProgram(wall_program);
       }

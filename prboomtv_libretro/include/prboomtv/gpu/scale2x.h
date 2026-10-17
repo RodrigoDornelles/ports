@@ -28,12 +28,17 @@ void dopo_scale_read(retro_environment_t environ_cb);
 /** @brief A transparent texel of dopo_scale_image. */
 #define DOPO_SCALE_CLEAR 0xffff
 
+/** @brief The brightmap level of a texel of dopo_scale_image (bits 8-14:
+ * dopo_brightmask_alpha, 0 none). */
+#define DOPO_SCALE_LEVEL(c) (((c) >> 8) & 0x7f)
+
 /**
  * @brief The patch's palette indices at k times its size (k = 1, 2 or 4
  * for the mode, stored in *k), DOPO_SCALE_CLEAR where transparent,
- * column major: column x is k * height texels long. NULL when out of
- * memory; the caller frees it.
+ * the brightmap's level in DOPO_SCALE_LEVEL (the patch's brightmap,
+ * column major, or NULL), column major: column x is k * height texels long.
+ * NULL when out of memory; the caller frees it.
  */
-uint16_t *dopo_scale_image(const rpatch_t *p, int mode, int *k);
+uint16_t *dopo_scale_image(const rpatch_t *p, const uint8_t *bright, int mode, int *k);
 
 #endif

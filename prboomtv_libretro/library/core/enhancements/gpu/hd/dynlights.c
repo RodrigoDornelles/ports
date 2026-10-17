@@ -1,10 +1,11 @@
 /**
  * @file dynlights.c
- * @brief The prboom-dynlight core option (prboomtv/dynlights.h).
+ * @brief The prboom-dynlight core option (prboomtv/gpu/dynlights.h).
  *
  * The lights are GLDEFS, GZDoom's format: light definitions (pointlight,
  * pulselight, flickerlight, flickerlight2: colour, radius, how it
- * animates, an offset up from the thing) and the sprite frames that carry
+ * animates, an offset from the thing that turns with it) and the sprite
+ * frames that carry
  * them (object CLASS { frame BAL1C { light IMPBALL_X1 } }, a frame with no
  * letter meaning all of them; the class is not looked at, the sprite
  * is). Read in order, a later definition or binding replacing an earlier
@@ -42,9 +43,9 @@
 #include "w_wad.h"
 #include "u_scanner.h"
 #include "streams/file_stream.h"
-#include "prboomtv/gldefs.h"
-#include "prboomtv/dynlights.h"
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/gldefs.h"
+#include "prboomtv/gpu/dynlights.h"
+#include "prboomtv/gpu/render_gl.h"
 
 unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
                                 const char *path, int *out_length);
@@ -137,6 +138,8 @@ typedef struct
    float chance;           /* flicker: how often the main size */
    int   has_offset;
    float up;               /* offset above the thing's feet */
+   float fwd, side;        /* offset ahead of the thing and to its left,
+                            * turning with it (GLDEFS offset x, z) */
 } dl_def_t;
 
 typedef struct
@@ -249,7 +252,9 @@ static void dl_parse_light(u_scanner_t *s, int kind)
          if (dl_number(s, &a) && dl_number(s, &b) && dl_number(s, &c))
          {
             d.has_offset = 1;
-            d.up = (float)b;      /* x, height, z */
+            d.fwd = (float)a;     /* x ahead, height, z to the side */
+            d.up = (float)b;
+            d.side = (float)c;
          }
       }
       else if (!strcasecmp(s->string, "subtractive") && dl_number(s, &v) && v)
@@ -370,14 +375,13 @@ static void dl_dirname(char *out, size_t size, const char *path)
       out[0] = 0;
 }
 
-/* GZDoom's lights.pk3, the first found: next to the game (the folder of
- * any loaded wad, the IWAD's or the content's), next to the core, in the
- * system directory or its prboom folder */
-static void dl_parse_lights_pk3(void)
+/* A file of GZDoom's (lights.pk3, brightmaps.pk3), the first found: next
+ * to the game (the folder of any loaded wad, the IWAD's or the content's),
+ * next to the core, in the system directory or its prboom folder; its
+ * bytes (the caller frees them) and where it was, NULL when nowhere. */
+void *dopo_resource_read(const char *file, int64_t *len, char *where, size_t where_size)
 {
-   const char *game = hexen ? "hexen" : heretic ? "heretic"
-                    : W_CheckNumForName("FREEDOOM") >= 0 ? "doom.freedoom" : "doom.id";
-   char dirs[16][1100], path[1200], member[64];
+   char dirs[16][1100], path[1200];
    int i, k, n = 0;
 
    for (k = 0; k < (int)numwadfiles && n < 12; k++)
@@ -397,25 +401,45 @@ static void dl_parse_lights_pk3(void)
       snprintf(dirs[n++], sizeof(dirs[0]), "%s", dl_system_dir);
       snprintf(dirs[n++], sizeof(dirs[0]), "%s/prboom", dl_system_dir);
    }
-   snprintf(member, sizeof(member), "filter/%s/gldefs.txt", game);
    for (i = 0; i < n; i++)
    {
-      void *zip = NULL;
-      int64_t len = 0;
-      unsigned char *text;
-      int text_len = 0;
-      snprintf(path, sizeof(path), "%.1100s/lights.pk3", dirs[i]);
-      if (!filestream_exists(path) || filestream_read_file(path, &zip, &len) <= 0 || !zip)
+      void *data = NULL;
+      snprintf(path, sizeof(path), "%.1100s/%s", dirs[i], file);
+      if (!filestream_exists(path) || filestream_read_file(path, &data, len) <= 0 || !data)
          continue;
-      text = W_PK3ExtractPath((const unsigned char *)zip, len, member, &text_len);
-      free(zip);
-      if (text)
-      {
-         dl_parse((const char *)text, text_len, "lights.pk3");
-         free(text);
-         lprintf(LO_INFO, "prboom-dynlight: %s from %s\n", member, path);
-         return;
-      }
+      if (where)
+         snprintf(where, where_size, "%s", path);
+      return data;
+   }
+   return NULL;
+}
+
+/* the folder of GZDoom's filter/ this game reads */
+const char *dopo_resource_game(void)
+{
+   return hexen ? "hexen" : heretic ? "heretic"
+        : W_CheckNumForName("FREEDOOM") >= 0 ? "doom.freedoom" : "doom.id";
+}
+
+/* lights.pk3's GLDEFS for this game */
+static void dl_parse_lights_pk3(void)
+{
+   char member[64], where[1200];
+   int64_t len = 0;
+   void *zip = dopo_resource_read("lights.pk3", &len, where, sizeof(where));
+   unsigned char *text;
+   int text_len = 0;
+
+   if (!zip)
+      return;
+   snprintf(member, sizeof(member), "filter/%s/gldefs.txt", dopo_resource_game());
+   text = W_PK3ExtractPath((const unsigned char *)zip, len, member, &text_len);
+   free(zip);
+   if (text)
+   {
+      dl_parse((const char *)text, text_len, "lights.pk3");
+      free(text);
+      lprintf(LO_INFO, "prboom-dynlight: %s from %s\n", member, where);
    }
 }
 
@@ -602,6 +626,14 @@ int dopo_dynlight_collect(dopo_light_t *out, int max)
       l->x = mo->x / 65536.0f - vx;
       l->y = mo->y / 65536.0f - vy;
       l->z = (mo->z / 65536.0f) + (d->has_offset ? d->up : mo->height / 131072.0f) - vz;
+      if (d->fwd != 0 || d->side != 0)
+      {
+         /* ahead of the thing, where it faces (a muzzle flash), as GZDoom
+          * turns the offset with the actor */
+         const double a = mo->angle * (2 * M_PI / 4294967296.0);
+         l->x += (float)(d->fwd * cos(a) + d->side * sin(a));
+         l->y += (float)(d->fwd * sin(a) - d->side * cos(a));
+      }
       l->radius = r;
       l->r = d->r;
       l->g = d->g;
@@ -694,7 +726,7 @@ unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
 /* @endpatch */
 
 /** @patch src/p_mobj.c 62 */
-#include "prboomtv/dynlights.h"
+#include "prboomtv/gpu/dynlights.h"
 /* @endpatch */
 
 /**
@@ -708,7 +740,7 @@ unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
 /* @endpatch */
 
 /** @patch src/p_setup.c 67 */
-#include "prboomtv/dynlights.h"
+#include "prboomtv/gpu/dynlights.h"
 /* @endpatch */
 
 /** @patch src/p_setup.c 3097 */

@@ -1,6 +1,6 @@
 /**
  * @file scale2x.c
- * @brief The prboom-scale core option (prboomtv/scale2x.h).
+ * @brief The prboom-scale core option (prboomtv/gpu/scale2x.h).
  *
  * Scale2x (EPX) only reuses the original pixels: each texel becomes four,
  * each taking a neighbour's index where the two neighbours that meet at
@@ -14,7 +14,8 @@
 #include <string.h>
 
 #include "doomtype.h"
-#include "prboomtv/scale2x.h"
+#include "prboomtv/gpu/brightmaps.h"
+#include "prboomtv/gpu/scale2x.h"
 
 const struct retro_core_option_v2_definition dopo_scale_option =
 {
@@ -86,7 +87,7 @@ static void scale2x(const uint16_t *src, uint16_t *dst, int w, int h, dbool cont
       }
 }
 
-uint16_t *dopo_scale_image(const rpatch_t *p, int mode, int *k)
+uint16_t *dopo_scale_image(const rpatch_t *p, const uint8_t *bright, int mode, int *k)
 {
    /* one column after another: a row of the image is a patch column */
    const int w = p->height, h = p->width;
@@ -107,7 +108,9 @@ uint16_t *dopo_scale_image(const rpatch_t *p, int mode, int *k)
          const rpost_t *post = &column->posts[i];
          for (y = post->topdelta; y < post->topdelta + post->length && y < p->height; y++)
             if (y >= 0)
-               src[x * w + y] = column->pixels[y];
+               src[x * w + y] = column->pixels[y]
+                              | (bright && bright[x * w + y]
+                                 ? dopo_brightmask_alpha(bright[x * w + y]) << 8 : 0);
       }
    }
    if (*k == 1)

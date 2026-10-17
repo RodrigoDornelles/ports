@@ -13,10 +13,10 @@
 #include "v_video.h"
 #include "w_wad.h"
 #include "prboomtv/frameskip.h"
-#include "prboomtv/render_gl.h"
-#include "prboomtv/scale2x.h"
-#include "prboomtv/glow.h"
-#include "prboomtv/dynlights.h"
+#include "prboomtv/gpu/render_gl.h"
+#include "prboomtv/gpu/scale2x.h"
+#include "prboomtv/gpu/glow.h"
+#include "prboomtv/gpu/dynlights.h"
 #include "prboomtv/widescreen.h"
 
 dbool dopo_widescreen = TRUE;

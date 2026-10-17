@@ -7,7 +7,7 @@
  */
 
 /** @patch src/r_things.c 55 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**
@@ -29,15 +29,15 @@
 /* @endpatch */
 
 /**
- * @brief A plain sprite (no brightmap, tint, sloped edges or Raven shadow
- * blend) is offered to the GPU, translucent and additive ones (DECORATE,
+ * @brief A plain sprite (no tint, sloped edges or Raven shadow blend; its
+ * brightmap goes with it, prboomtv/gpu/brightmaps.h) is offered to the GPU, translucent and additive ones (DECORATE,
  * prboom-glow) with their blend; a fuzzy one too, drawn in the
  * prboom-spectre look.
  *
  * @patch src/r_things.c 1211
  */
   const dbool gl_sprite = dopo_gl_masked_begin(patch, vis->patch + firstspritelump, -1, colfunc,
-        !sprmask && dcvars.edgetype != RDRAW_MASKEDCOLUMNEDGE_SLOPED
+        dcvars.edgetype != RDRAW_MASKEDCOLUMNEDGE_SLOPED
         && !(vis->tint_r | vis->tint_g | vis->tint_b)
         && !(raven && (vis->mobjflags & (MF_SHADOW | MF_ALTSHADOW)) && vis->colormap),
         !dcvars.colormap, vis, vis->x1, vis->x2);

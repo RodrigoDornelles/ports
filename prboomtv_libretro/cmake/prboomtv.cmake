@@ -290,40 +290,40 @@ if (prboomtv_font_result)
 endif()
 
 # the GPU renderer's shaders, embedded as C arrays named after their files
-# (dopo/scripts/xxd.cpp) into include/prboomtv/shaders.h of the build tree;
+# (dopo/scripts/xxd.cpp) into include/prboomtv/gpu/shaders.h of the build tree;
 # a shader that changes reconfigures, the header is only rewritten on change
 dopo_host_tool(dopo_xxd "${DOPO_DIR}/scripts/xxd.cpp")
 file(GLOB prboomtv_shaders CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/library/core/enhancements/gpu/shaders/*.glsl")
 list(SORT prboomtv_shaders)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_shaders})
 set(PRBOOMTV_INCLUDE_GENERATED "${CMAKE_BINARY_DIR}/include")
-file(MAKE_DIRECTORY "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv")
+file(MAKE_DIRECTORY "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu" "${CMAKE_BINARY_DIR}/prboomtv/gpu")
 execute_process(
     COMMAND "${dopo_xxd_TOOL}" ${prboomtv_shaders}
-    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/shaders.h"
+    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/shaders.h"
     RESULT_VARIABLE prboomtv_xxd_result
     ERROR_VARIABLE prboomtv_xxd_error)
 if (prboomtv_xxd_result)
     message(FATAL_ERROR "prboomtv: failed to embed the shaders\n${prboomtv_xxd_error}")
 endif()
-file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/shaders.h"
-    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/shaders.h" ONLY_IF_DIFFERENT)
+file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/shaders.h"
+    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/shaders.h" ONLY_IF_DIFFERENT)
 
 # the built-in dynamic lights (prboom-dynlight, GLDEFS text), the same way
-# into include/prboomtv/gldefs.h
+# into include/prboomtv/gpu/gldefs.h
 file(GLOB prboomtv_gldefs CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/library/core/enhancements/gpu/gldefs/*.txt")
 list(SORT prboomtv_gldefs)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_gldefs})
 execute_process(
     COMMAND "${dopo_xxd_TOOL}" ${prboomtv_gldefs}
-    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/gldefs.h"
+    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
     RESULT_VARIABLE prboomtv_xxd_result
     ERROR_VARIABLE prboomtv_xxd_error)
 if (prboomtv_xxd_result)
     message(FATAL_ERROR "prboomtv: failed to embed the lights\n${prboomtv_xxd_error}")
 endif()
-file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gldefs.h"
-    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gldefs.h" ONLY_IF_DIFFERENT)
+file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
+    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/gldefs.h" ONLY_IF_DIFFERENT)
 
 set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
 dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files})

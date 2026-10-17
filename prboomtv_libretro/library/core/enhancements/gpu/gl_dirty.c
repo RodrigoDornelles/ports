@@ -8,7 +8,7 @@
  */
 
 /** @patch src/v_video.c 50 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**
@@ -134,7 +134,7 @@
 /* @endpatch */
 
 /** @patch src/d_main.c 102 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**

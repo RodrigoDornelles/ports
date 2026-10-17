@@ -12,7 +12,7 @@
  *
  * @patch src/r_drawcmd.c 31
  */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**
@@ -51,7 +51,7 @@
 /* @endpatch */
 
 /** @patch src/r_segs.c 57 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**
@@ -75,7 +75,7 @@
 /* @endpatch */
 
 /** @patch src/r_plane.c 75 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**
@@ -127,7 +127,7 @@
  *
  * @patch src/r_draw.c 74
  */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 #undef GETBLENDED16_9406
 #define GETBLENDED16_9406(col1, col2) dopo_gl_fuzz16(col1, col2)
 /* @endpatch */
@@ -154,7 +154,7 @@
 /* @endpatch */
 
 /** @patch src/r_main.c 68 */
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/render_gl.h"
 /* @endpatch */
 
 /**

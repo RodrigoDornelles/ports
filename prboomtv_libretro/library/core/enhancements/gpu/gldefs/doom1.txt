@@ -16,9 +16,10 @@ flickerlight DL_BFG_X { color 0.3 1.0 0.3 size 160 secondarysize 180 chance 0.4 
 pointlight DL_ROCKET { color 1.0 0.7 0.2 size 64 }
 flickerlight DL_BLAST { color 1.0 0.6 0.2 size 112 secondarysize 128 chance 0.3 }
 
-// muzzle flashes and the lost soul's flames
-pointlight DL_FLASH { color 1.0 0.8 0.4 size 96 }
-pointlight DL_ZOMBIEFLASH { color 1.0 0.8 0.4 size 64 offset 0 40 0 }
+// muzzle flashes (a little ahead of the shooter, where the gun points)
+// and the lost soul's flames
+pointlight DL_FLASH { color 1.0 0.8 0.4 size 96 offset 24 40 0 }
+pointlight DL_ZOMBIEFLASH { color 1.0 0.8 0.4 size 64 offset 28 36 0 }
 flickerlight DL_SKULL { color 1.0 0.5 0.1 size 48 secondarysize 56 chance 0.5 }
 
 // torches and lamps (prboom-dynlight 2)

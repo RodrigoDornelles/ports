@@ -1,6 +1,6 @@
 /**
  * @file glow.c
- * @brief The prboom-glow core option (prboomtv/glow.h).
+ * @brief The prboom-glow core option (prboomtv/gpu/glow.h).
  *
  * Only the full bright frames of a list of sprites glow, the ones GZDoom
  * draws with RenderStyle Add: the monsters' and the player's projectiles
@@ -22,8 +22,9 @@
 #include <string.h>
 #include <strings.h>
 
-#include "prboomtv/glow.h"
-#include "prboomtv/render_gl.h"
+#include "prboomtv/gpu/brightmaps.h"
+#include "prboomtv/gpu/glow.h"
+#include "prboomtv/gpu/render_gl.h"
 
 const struct retro_core_option_v2_definition dopo_glow_option =
 {
@@ -102,10 +103,13 @@ void dopo_glow_mark(vissprite_t *vis, int sprite, int frame)
 /* @endpatch */
 
 /**
- * @brief A thing that glows.
+ * @brief A thing that glows; first, a full bright frame whose brightmap
+ * keeps it in the room's light (prboomtv/gpu/brightmaps.h).
  *
  * @patch src/r_things.c 1714
  */
+   if ((thing->frame & FF_FULLBRIGHT) && !fixedcolormap)
+      dopo_brightmap_project(vis, R_ColourMap(lightlevel, xscale));
    dopo_glow_mark(vis, thing->sprite, thing->frame);
 /* @endpatch */
 

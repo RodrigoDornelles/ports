@@ -14,6 +14,9 @@
 #ifndef PRBOOMTV_DYNLIGHTS_H
 #define PRBOOMTV_DYNLIGHTS_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "libretro.h"
 
 /** @brief The option. */
@@ -41,6 +44,21 @@ void dopo_maplight_clear(void);
  * it is a light (9800 and up), which spawns nothing.
  */
 int dopo_maplight_add(int x, int y, int angle, int type);
+
+/**
+ * @brief A file of GZDoom's (lights.pk3, brightmaps.pk3), the first found
+ * next to the game, next to the core, in the system directory or its
+ * prboom folder: its bytes, which the caller frees, and where it was;
+ * NULL when nowhere.
+ */
+void *dopo_resource_read(const char *file, int64_t *len, char *where, size_t where_size);
+
+/** @brief The folder of GZDoom's filter/ this game reads (doom.id...). */
+const char *dopo_resource_game(void);
+
+/** @brief One member of a pk3 by its path, malloc'd; NULL if missing. */
+unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
+                                const char *path, int *out_length);
 
 /** @brief The most lights a frame keeps (the nearest). */
 #define DOPO_LIGHTS_MAX 8
