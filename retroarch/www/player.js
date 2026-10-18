@@ -18,6 +18,8 @@ const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com
 const HOME = '/home/web_user/retroarch';
 const USERDATA = `${HOME}/userdata`;
 const CONFIG = `${USERDATA}/retroarch.cfg`;
+/* outside userdata: not kept, the options always come from the page */
+const CORE_OPTIONS = `${HOME}/core-options.cfg`;
 
 /** retroarch.cfg values for the browser, on top of what the user saved. */
 const DEFAULTS = {
@@ -92,11 +94,14 @@ function sync(FS, populate) {
  * content:  URL of the content, written under its own file name
  * nick:     netplay nickname
  * config:   more retroarch.cfg values
+ * options:  core options, { 'prboom-glow': '1' } (default: the ones in
+ *           the page's hash, coreOptions())
  * turn:     URL answering {"iceServers": [...]} with TURN servers
  *           (optional; without it, STUN only)
  * progress: (loaded, total) while the content downloads
  */
-export async function play({ canvas, core, content, nick, config = {}, turn, progress }) {
+export async function play({ canvas, core, content, nick, config = {}, options = coreOptions(),
+                            turn, progress }) {
   const name = decodeURIComponent(new URL(content, location.href).pathname.split('/').pop());
   const coreUrl = new URL(core, location.href);
   const [data, { default: factory }, trystero, iceServers] = await Promise.all([
@@ -131,9 +136,15 @@ export async function play({ canvas, core, content, nick, config = {}, turn, pro
   const saved = FS.analyzePath(CONFIG).exists ? FS.readFile(CONFIG, { encoding: 'utf8' }) : '';
   FS.writeFile(CONFIG, setConfig(saved, {
     ...DEFAULTS,
+    /* one core options file, so the page can set them without knowing
+     * the core's library name (config/<name>/<name>.opt) */
+    global_core_options: 'true',
+    core_options_path: CORE_OPTIONS,
     ...(nick ? { netplay_nickname: nick } : {}),
     ...config,
   }));
+  /* only the page's options; the rest take the core's defaults */
+  FS.writeFile(CORE_OPTIONS, setConfig('', options));
   FS.writeFile(`${HOME}/content/${name}`, data);
 
   /* userdata back to IndexedDB now and then, and when the page goes */
@@ -152,4 +163,14 @@ export async function play({ canvas, core, content, nick, config = {}, turn, pro
 /** The page's hash as parameters: #nick=rodrigo */
 export function hashParams() {
   return new URLSearchParams(location.hash.slice(1));
+}
+
+/** The core options in the page's hash, the keys with a dash (libretro
+ * option keys are <core>-<option>): #prboom-glow=1&prboom-dynlight=2 */
+export function coreOptions() {
+  const options = {};
+  for (const [key, value] of hashParams())
+    if (key.includes('-'))
+      options[key] = value;
+  return options;
 }
