@@ -59,14 +59,20 @@ const struct retro_core_option_v2_definition dopo_dynlight_option =
    "Coloured light from fireballs, explosions and the muzzle flash on the "
    "walls, floors and monsters around them, as GZDoom's dynamic lights; "
    "only with the gl renderer. 'all' adds the torches, lamps and glowing "
-   "items. Uses GZDoom's lights.pk3 when it is next to the game, next to "
-   "the core or in the system directory, a small built-in set otherwise.",
+   "items; 'all + shadows' lets the walls stop them, as GZDoom's light "
+   "shadowmaps (a torch lights only its room, a flash does not shine "
+   "through a wall; the shadows lie on the map's plane, a step casts none), "
+   "worth it in maps made for GZDoom that place their own lights, little "
+   "seen in classic maps and dearer on a weak GPU. Uses GZDoom's lights.pk3 "
+   "when it is next to the game, next to the core or in the system "
+   "directory, a small built-in set otherwise.",
    NULL,
    NULL,
    {
       { "0", "Off" },
       { "1", "Moving" },
       { "2", "All" },
+      { "3", "All + Shadows" },
       { NULL, NULL },
    },
    "2"
@@ -94,6 +100,29 @@ const struct retro_core_option_v2_definition dopo_maplight_option =
 
 int dopo_maplight = 1;
 
+const struct retro_core_option_v2_definition dopo_lights_option =
+{
+   "prboom-lights",
+   "Dynamic Lights at Once (gl only)",
+   NULL,
+   "How many dynamic lights a frame keeps, the ones reaching nearest the "
+   "eye; the rest wait until they come closer. Classic maps rarely have "
+   "more than 8 near at once; maps made for GZDoom place dozens. Each one "
+   "is work for every lit pixel, so more is heavier on the GPU (also capped "
+   "by what the GPU takes).",
+   NULL,
+   NULL,
+   {
+      { "8",  NULL },
+      { "16", NULL },
+      { "32", NULL },
+      { NULL, NULL },
+   },
+   "8"
+};
+
+int dopo_lights = 8;
+
 static char dl_system_dir[1024];
 static char dl_core_dir[1024];
 
@@ -104,8 +133,13 @@ void dopo_dynlight_read(retro_environment_t environ_cb)
 
    dopo_dynlight = 2;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
-         && (!strcmp(var.value, "0") || !strcmp(var.value, "1")))
+         && (!strcmp(var.value, "0") || !strcmp(var.value, "1") || !strcmp(var.value, "3")))
       dopo_dynlight = var.value[0] - '0';
+   var.key = "prboom-lights";
+   var.value = NULL;
+   dopo_lights = 8;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      dopo_lights = !strcmp(var.value, "32") ? 32 : !strcmp(var.value, "16") ? 16 : 8;
    var.key = "prboom-9800";
    var.value = NULL;
    dopo_maplight = !(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value
@@ -140,6 +174,7 @@ typedef struct
    float up;               /* offset above the thing's feet */
    float fwd, side;        /* offset ahead of the thing and to its left,
                             * turning with it (GLDEFS offset x, z) */
+   int   attenuate;        /* fades with the angle it meets a surface at */
 } dl_def_t;
 
 typedef struct
@@ -214,6 +249,7 @@ static void dl_parse_light(u_scanner_t *s, int kind)
    d.r = d.g = d.b = 1;
    d.interval = 35;
    d.chance = 0.5f;
+   d.attenuate = 1;
    if (!U_GetNextToken(s, TRUE) || (s->token != TK_Identifier && s->token != TK_StringConst))
       return;
    snprintf(d.name, sizeof(d.name), "%s", s->string);
@@ -259,6 +295,8 @@ static void dl_parse_light(u_scanner_t *s, int kind)
       }
       else if (!strcasecmp(s->string, "subtractive") && dl_number(s, &v) && v)
          d.size = 0;              /* darkness: not done */
+      else if (!strcasecmp(s->string, "attenuate") && dl_number(s, &v))
+         d.attenuate = v != 0;
    }
    if (d.size2 <= 0)
       d.size2 = d.size;
@@ -459,6 +497,11 @@ void dopo_maplight_clear(void)
    dl_map_n = 0;
 }
 
+int dopo_maplight_count(void)
+{
+   return dl_map_n;
+}
+
 int dopo_maplight_add(int x, int y, int angle, int type)
 {
    const int group = (type - 9800) / 10, variant = type % 10;
@@ -466,6 +509,32 @@ int dopo_maplight_add(int x, int y, int angle, int type)
    const sector_t *sec;
    dl_def_t *d;
 
+   if (type == 1502 || type == 1503)
+   {
+      /* Vavoom's lights: the size in arg 0, a colour in args 1-3 (1503) */
+      if (dl_map_n == DL_MAP_MAX || hexen_thing_args[0] <= 0)
+         return 1;
+      sec = R_PointInSubsector(fx, fy)->sector;
+      dl_map[dl_map_n].x = fx;
+      dl_map[dl_map_n].y = fy;
+      dl_map[dl_map_n].z = sec->floorheight + hexen_thing_height * FRACUNIT;
+      dl_map[dl_map_n].sector = NULL;
+      d = &dl_map[dl_map_n].d;
+      memset(d, 0, sizeof(*d));
+      d->r = d->g = d->b = 1;
+      if (type == 1503)
+      {
+         d->r = hexen_thing_args[1] / 255.0f;
+         d->g = hexen_thing_args[2] / 255.0f;
+         d->b = hexen_thing_args[3] / 255.0f;
+      }
+      d->size = d->size2 = hexen_thing_args[0];
+      d->kind = DLK_POINT;
+      d->interval = TICRATE;
+      d->has_offset = 1;
+      dl_map_n++;
+      return 1;
+   }
    if (type < 9800 || type > 9899)
       return 0;
    /* point lights, plain, additive or attenuated; the others (subtractive,
@@ -491,6 +560,9 @@ int dopo_maplight_add(int x, int y, int angle, int type)
    d->interval = angle > 0 ? angle : TICRATE;
    d->chance = angle > 0 ? angle / 360.0f : 0.5f;
    d->has_offset = 1;
+   /* 9800-9814 light as GZDoom's legacy lights, whatever the angle; 9830
+    * and up fade with it */
+   d->attenuate = group == 3;
    dl_map_n++;
    return 1;
 }
@@ -638,11 +710,14 @@ int dopo_dynlight_collect(dopo_light_t *out, int max)
       l->r = d->r;
       l->g = d->g;
       l->b = d->b;
+      l->attenuate = (float)d->attenuate;
       /* behind the eye with all of its reach: nothing it lights shows */
       fwd = l->x * fx + l->y * fy;
       if (fwd < -r)
          continue;
-      dist[n] = l->x * l->x + l->y * l->y + l->z * l->z;
+      /* how far the eye is from its reach: the nearest edges win, so a
+       * big light over a room is kept over a candle at the eye's side */
+      dist[n] = (float)sqrt(l->x * l->x + l->y * l->y + l->z * l->z) - r;
       n++;
    }
    /* the map's own lights */
@@ -666,13 +741,16 @@ int dopo_dynlight_collect(dopo_light_t *out, int max)
       l->r = d->r;
       l->g = d->g;
       l->b = d->b;
+      l->attenuate = (float)d->attenuate;
       fwd = l->x * fx + l->y * fy;
       if (fwd < -r)
          continue;
-      dist[n] = l->x * l->x + l->y * l->y + l->z * l->z;
+      /* how far the eye is from its reach: the nearest edges win, so a
+       * big light over a room is kept over a candle at the eye's side */
+      dist[n] = (float)sqrt(l->x * l->x + l->y * l->y + l->z * l->z) - r;
       n++;
    }
-   /* the nearest max */
+   /* the max with the nearest reach */
    for (i = 0; i < n && i < max; i++)
    {
       int best = i;

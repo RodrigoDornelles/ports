@@ -1,6 +1,6 @@
 #version 100
 // A floor or ceiling rectangle a dynamic light reaches (prboom-dynlight,
-// gl.c): as vert_plane, plus where the corner is from the eye and the
+// gl.c): as vert_plane, plus where the corner is from the eye (in map units / 64) and the
 // plane's normal, interpolated in perspective like the rest.
 attribute vec2 a_pos;
 attribute vec2 a_st;

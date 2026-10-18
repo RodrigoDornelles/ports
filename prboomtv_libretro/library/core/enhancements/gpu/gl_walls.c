@@ -150,7 +150,7 @@
          R_SpanTexture = (R_IsSyntheticFlat(pl->picnum) || tilt_plane
                           || plane_dynlit || plane_wallglow)
                        ? 0 : firstflat + flattranslation[pl->picnum] + 1;
-         dopo_gl_plane_begin(planeheight, light);
+         dopo_gl_plane_begin(planeheight, light, pl->skybox);
 /* @endpatch */
 
 /** @patch src/r_main.c 68 */

@@ -29,6 +29,12 @@ extern int dopo_dynlight;
  * for lights.pk3. */
 void dopo_dynlight_read(retro_environment_t environ_cb);
 
+/** @brief The prboom-lights core option: how many lights a frame keeps. */
+extern const struct retro_core_option_v2_definition dopo_lights_option;
+
+/** @brief prboom-lights in effect: 8, 16 or 32. */
+extern int dopo_lights;
+
 /** @brief The prboom-9800 core option: the lights a map places itself. */
 extern const struct retro_core_option_v2_definition dopo_maplight_option;
 
@@ -38,10 +44,14 @@ extern int dopo_maplight;
 /** @brief A new map: its lights are gathered again (P_SetupLevel). */
 void dopo_maplight_clear(void);
 
+/** @brief How many lights the map places itself. */
+int dopo_maplight_count(void);
+
 /**
  * @brief A map thing of editor number type at (x, y), facing angle, with
  * its Hexen-format args and height in hexen_thing_args/_height: true when
- * it is a light (9800 and up), which spawns nothing.
+ * it is a light (9800 and up, Vavoom's 1502 and 1503), which spawns
+ * nothing.
  */
 int dopo_maplight_add(int x, int y, int angle, int type);
 
@@ -60,8 +70,9 @@ const char *dopo_resource_game(void);
 unsigned char *W_PK3ExtractPath(const unsigned char *zip, int64_t zip_length,
                                 const char *path, int *out_length);
 
-/** @brief The most lights a frame keeps (the nearest). */
-#define DOPO_LIGHTS_MAX 8
+/** @brief The most lights a frame can keep; gl.c asks for prboom-lights,
+ * no more than the GPU's fragment shaders take (8, 16 or 32). */
+#define DOPO_LIGHTS_MAX 32
 
 /** @brief A light of the frame, relative to the view (map units). */
 typedef struct
@@ -69,11 +80,13 @@ typedef struct
    float x, y, z;      /* from the eye */
    float radius;
    float r, g, b;      /* 0..1 */
+   float attenuate;    /* 1: fades with the angle it meets a surface at */
 } dopo_light_t;
 
 /**
- * @brief The lights of this frame near the view, nearest first, at most
- * max; 0 when the option is off or nothing glows.
+ * @brief The lights of this frame near the view, the ones whose reach
+ * comes nearest the eye first (a big light over the room before a candle
+ * beside it), at most max; 0 when the option is off or nothing glows.
  */
 int dopo_dynlight_collect(dopo_light_t *out, int max);
 

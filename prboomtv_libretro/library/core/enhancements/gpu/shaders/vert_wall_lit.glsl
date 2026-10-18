@@ -1,6 +1,6 @@
 #version 100
 // A wall column a dynamic light reaches (prboom-dynlight, gl.c): as
-// vert_wall, plus where the corner is from the eye and the wall's normal.
+// vert_wall, plus where the corner is from the eye (in map units / 64) and the wall's normal.
 attribute vec2 a_pos;
 attribute vec2 a_st;
 attribute float a_l;

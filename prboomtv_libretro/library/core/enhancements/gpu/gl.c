@@ -53,6 +53,8 @@
 #include "prboomtv/gpu/glow.h"
 #include "prboomtv/gpu/dynlights.h"
 #include "prboomtv/gpu/brightmaps.h"
+#include "prboomtv/gpu/lightcolor.h"
+#include "prboomtv/gpu/shadowmap.h"
 #include "prboomtv/gpu/shaders.h"
 #include "prboomtv/widescreen.h"
 
@@ -207,6 +209,8 @@ typedef unsigned int  GLbitfield;
 #define GL_RENDERER               0x1F01
 #define GL_VERSION                0x1F02
 #define GL_MAX_TEXTURE_SIZE       0x0D33
+#define GL_MAX_FRAGMENT_UNIFORM_VECTORS    0x8DFD
+#define GL_MAX_FRAGMENT_UNIFORM_COMPONENTS 0x8B49
 
 #define GLFN(ret, name, args) static ret (*name) args
 GLFN(void, glViewport, (GLint, GLint, GLsizei, GLsizei));
@@ -355,9 +359,8 @@ typedef struct
    float    s, t;   /* texture coordinates at the corner */
    float    w;      /* distance at the corner: the clip w */
    float    z;      /* the same over the light table's width */
-   uint8_t  lev;    /* light table row */
-   uint8_t  base;   /* colour table row of the plane's COLORMAP */
-   uint8_t  pad[2];
+   uint16_t lev;    /* light table row */
+   uint16_t base;   /* colour table row of the plane's COLORMAP (or tint) */
 } glpvert_t;
 
 static glpvert_t      *plane_v = NULL;
@@ -427,6 +430,17 @@ static gltex_t         corona_tex;          /* a radial ramp, 64x64 */
  * more. A sprite gets their sum at its middle. */
 static dopo_light_t    gl_dyn[DOPO_LIGHTS_MAX];
 static int             gl_dyn_n = 0;
+static int             gl_dyn_gpu = 8;      /* the most the GPU's shaders take */
+static int             gl_dyn_cap = 0;      /* what the lit shaders were made for:
+                                             * prboom-lights, within gl_dyn_gpu (a
+                                             * GPU unrolls the loop, so it costs
+                                             * that many whatever the frame has) */
+/* their shadows (prboom-shadowmap): a row per light, the distance to the
+ * nearest wall in each direction, 16 bits as luminance (high) and alpha */
+static uint16_t        gl_shadow_rows[DOPO_LIGHTS_MAX * DOPO_SHADOW_RAYS];
+static GLuint          shadow_tex = 0;
+static int             gl_dyn_shadows = 0;   /* the lit programs were made with SHADOWS */
+static dbool           shadow_dirty = FALSE;
 static double          gl_dyn_fx, gl_dyn_fy;   /* the view's direction */
 
 typedef struct
@@ -449,6 +463,12 @@ static int             litw_n = 0, litw_cap = 0;
 static glplvert_t     *litp_v = NULL;      /* lit floor rectangles */
 static gltex_t       **litp_t = NULL;
 static int             litp_n = 0, litp_cap = 0;
+
+/* The lit shaders work in map units over GL_DYN_UNIT: their floats are
+ * medium precision, 16 bits on the Mali-400 (and some desktop drivers),
+ * where a distance squared past about 256 map units overflows and a big
+ * light (a map's, reaching thousands of units) would end in a hard edge. */
+#define GL_DYN_UNIT 64.0
 
 /* the wall column being made into quads, when a light reaches it */
 static struct
@@ -516,6 +536,18 @@ static int             cmap_rows = 0, cmap_gl_rows = 0;
 static const uint16_t *cmap_palette = NULL;
 static const lighttable_t **cmap_colormaps = NULL;
 static int             cmap_count = 0;
+static int             cmap_palrow = 0;     /* the palette alone */
+static int             cmap_tints = 0;      /* tint blocks in the table */
+
+/* Coloured sector light (prboomtv/gpu/lightcolor.h): each colour a block
+ * of the colour table after the palette row, the COLORMAP's rows with the
+ * palette tinted, so a wall, a plane or a thing in that sector takes the
+ * same rows a block further. */
+#define GL_TINTS 32
+static uint32_t        gl_tint_rgb[GL_TINTS];
+static int             gl_tint_n = 0;
+static int             masked_tint = -1;    /* the sprite's sector's block */
+static int             plane_tint = -1;     /* the plane's */
 static uint16_t        cmap_palette_row[256];
 static int             cmap_lumprows[64];
 
@@ -526,7 +558,7 @@ static GLuint          wlit_program = 0, plit_program = 0, slit_program = 0;
 static GLuint          litw_vbo = 0, litp_vbo = 0;
 typedef struct
 {
-   GLint scale, offset, tex, cmap, zlight, rows, lpos, lcol, lcount, full, light, bright;
+   GLint scale, offset, tex, cmap, zlight, rows, lpos, lcol, lcount, full, light, bright, shadow;
 } gllit_u_t;
 static gllit_u_t       wlit_u, plit_u, slit_u;
 static GLint           corona_u_scale, corona_u_offset, corona_u_tex, corona_u_color;
@@ -686,6 +718,27 @@ static GLuint gl_program(const char *vs, const char *fs,
    return p;
 }
 
+/* a program whose fragment shader takes LIGHTS lights (frag_wall_lit,
+ * frag_plane_lit), and SHADOWS with prboom-dynlight=3 (off, the GPU
+ * does no lookup at all), the defines put after its #version line */
+static GLuint gl_program_lit(const char *vs, const char *fs,
+                             const char *const *attribs, int nattribs)
+{
+   const char *nl = strchr(fs, '\n');
+   char *src;
+   GLuint p;
+   if (!nl)
+      return 0;
+   src = (char *)malloc(strlen(fs) + 64);
+   if (!src)
+      return 0;
+   sprintf(src, "%.*s#define LIGHTS %d\n%s%s", (int)(nl - fs + 1), fs, gl_dyn_cap,
+           gl_dyn_shadows ? "#define SHADOWS 1\n" : "", nl + 1);
+   p = gl_program(vs, src, attribs, nattribs);
+   free(src);
+   return p;
+}
+
 static void gl_texture_params(GLint wrap)
 {
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -713,6 +766,7 @@ static void gl_forget_objects(void)
    cmap_tex = 0;
    cmap_palette = NULL;
    wall_program = frame_program = plane_program = fuzz_program = sprite_program = 0;
+   shadow_tex = 0;
    wallbm_program = planebm_program = 0;
    corona_program = 0;
    corona_tex.id = 0;
@@ -744,6 +798,33 @@ static void gl_lit_uniforms(gllit_u_t *u, GLuint prog)
    u->full   = glGetUniformLocation(prog, "u_full");
    u->light  = glGetUniformLocation(prog, "u_light");
    u->bright = glGetUniformLocation(prog, "u_bm");
+   u->shadow = glGetUniformLocation(prog, "u_shadow");
+}
+
+/* the wall and plane lit programs for prboom-lights lights (within what
+ * the GPU takes) and the shadows (prboom-dynlight=3), made again when either changes; the
+ * shadow texture has a row per light */
+static void gl_lit_programs(void)
+{
+   static const char *const wlit_attribs[] = { "a_pos", "a_st", "a_l", "a_world", "a_normal" };
+   static const char *const plit_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb",
+                                               "a_world", "a_normal" };
+   const int cap = dopo_lights < gl_dyn_gpu ? dopo_lights : gl_dyn_gpu;
+   if (cap == gl_dyn_cap && dopo_shadowmap_on() == gl_dyn_shadows && wlit_program && plit_program)
+      return;
+   if (wlit_program)
+      glDeleteProgram(wlit_program);
+   if (plit_program)
+      glDeleteProgram(plit_program);
+   if (shadow_tex)
+      glDeleteTextures(1, &shadow_tex);
+   shadow_tex = 0;
+   gl_dyn_cap = cap;
+   gl_dyn_shadows = dopo_shadowmap_on();
+   wlit_program = gl_program_lit(GL_SHADER(vert_wall_lit), GL_SHADER(frag_wall_lit), wlit_attribs, 5);
+   plit_program = gl_program_lit(GL_SHADER(vert_plane_lit), GL_SHADER(frag_plane_lit), plit_attribs, 7);
+   gl_lit_uniforms(&wlit_u, wlit_program);
+   gl_lit_uniforms(&plit_u, plit_program);
 }
 
 static void gl_context_reset(void)
@@ -782,14 +863,21 @@ static void gl_context_reset(void)
       sprite_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite), wall_attribs, 3);
       corona_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_corona), wall_attribs, 3);
       {
-         static const char *const wlit_attribs[] = { "a_pos", "a_st", "a_l", "a_world", "a_normal" };
-         static const char *const plit_attribs[] = { "a_pos", "a_st", "a_w", "a_z", "a_lb",
-                                                     "a_world", "a_normal" };
-         wlit_program = gl_program(GL_SHADER(vert_wall_lit), GL_SHADER(frag_wall_lit), wlit_attribs, 5);
-         plit_program = gl_program(GL_SHADER(vert_plane_lit), GL_SHADER(frag_plane_lit), plit_attribs, 7);
+         /* as many lights as the fragment shaders' uniforms take: two
+          * vectors each, besides the dozen the rest uses */
+         GLint vecs = 0;
+         glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &vecs);
+         if (vecs <= 0)
+         {
+            glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, &vecs);
+            vecs /= 4;
+         }
+         gl_dyn_gpu = vecs >= 96 ? 32 : vecs >= 56 ? 16 : 8;
+         lprintf(LO_INFO, "prboom-render gl: %d fragment uniform vectors, up to %d dynamic lights\n",
+                 (int)vecs, gl_dyn_gpu);
+         gl_dyn_cap = 0;
+         gl_lit_programs();
          slit_program = gl_program(GL_SHADER(vert_wall), GL_SHADER(frag_sprite_lit), wall_attribs, 3);
-         gl_lit_uniforms(&wlit_u, wlit_program);
-         gl_lit_uniforms(&plit_u, plit_program);
          gl_lit_uniforms(&slit_u, slit_program);
          glGenBuffers(1, &litw_vbo);
          glGenBuffers(1, &litp_vbo);
@@ -932,6 +1020,8 @@ static void gl_context_destroy(void)
       glDeleteProgram(planebm_program);
       glDeleteProgram(corona_program);
       glDeleteProgram(wlit_program);
+      if (shadow_tex)
+         glDeleteTextures(1, &shadow_tex);
       glDeleteProgram(plit_program);
       glDeleteProgram(slit_program);
       glDeleteBuffers(1, &litw_vbo);
@@ -1275,16 +1365,18 @@ static void gl_colormap_update(void)
          ? numcolormaps : (int)(sizeof(cmap_lumprows) / sizeof(*cmap_lumprows));
    /* keyed on the colours, not on V_Palette16: a palette blend flips it
     * between two buffers that may hold the same colours */
-   if (cmap_palette && cmap_colormaps == colormaps
+   if (cmap_palette && cmap_colormaps == colormaps && cmap_tints == gl_tint_n
          && cmap_count == count && !memcmp(row, cmap_palette_row, sizeof(row)))
       return;
 
-   cmap_rows = count * GL_CMAP_ROWS + 1;
+   cmap_palrow = count * GL_CMAP_ROWS;
+   cmap_rows = cmap_palrow + 1 + gl_tint_n * GL_CMAP_ROWS;
    cmap_gl_rows = gl_pot(cmap_rows);
    if (cmap_gl_rows > max_texture_size)
    {
       count = (max_texture_size - 1) / GL_CMAP_ROWS;
-      cmap_rows = count * GL_CMAP_ROWS + 1;
+      cmap_palrow = count * GL_CMAP_ROWS;
+      cmap_rows = cmap_palrow + 1;
       cmap_gl_rows = gl_pot(cmap_rows);
    }
    buf = (uint16_t *)calloc((size_t)256 * cmap_gl_rows, sizeof(uint16_t));
@@ -1298,7 +1390,24 @@ static void gl_colormap_update(void)
          for (i = 0; i < 256; i++)
             buf[(m * GL_CMAP_ROWS + r) * 256 + i] = row[cm[r * 256 + i]];
    }
-   memcpy(buf + (size_t)(cmap_rows - 1) * 256, row, sizeof(row));
+   memcpy(buf + (size_t)cmap_palrow * 256, row, sizeof(row));
+   /* the tints: the COLORMAP's rows, each colour times the sector's */
+   for (m = 0; cmap_rows > cmap_palrow + 1 && m < gl_tint_n; m++)
+   {
+      const unsigned tr = (gl_tint_rgb[m] >> 16) & 255, tg = (gl_tint_rgb[m] >> 8) & 255;
+      const unsigned tb = gl_tint_rgb[m] & 255;
+      const lighttable_t *cm = colormaps[0];
+      for (r = 0; r < cmap_lumprows[0]; r++)
+         for (i = 0; i < 256; i++)
+         {
+            const uint16_t c = row[cm[r * 256 + i]];
+            const unsigned cr = ((c >> 11) & 31) * tr / 255;
+            const unsigned cg = ((c >> 5) & 63) * tg / 255;
+            const unsigned cb = (c & 31) * tb / 255;
+            buf[(cmap_palrow + 1 + m * GL_CMAP_ROWS + r) * 256 + i] =
+               (uint16_t)((cr << 11) | (cg << 5) | cb);
+         }
+   }
    gl_key_pick(row);
 
    glBindTexture(GL_TEXTURE_2D, cmap_tex);
@@ -1312,6 +1421,40 @@ static void gl_colormap_update(void)
    cmap_palette = V_Palette16;
    cmap_colormaps = colormaps;
    cmap_count = count;
+   cmap_tints = cmap_rows > cmap_palrow + 1 ? gl_tint_n : 0;
+}
+
+/* a colour's tint block, made the first time it shows; -1 untinted, or
+ * when the table has no room */
+static int gl_tint_block(uint32_t rgb)
+{
+   int t;
+   rgb &= 0xffffff;
+   if (rgb == 0xffffff)
+      return -1;
+   for (t = 0; t < gl_tint_n; t++)
+      if (gl_tint_rgb[t] == rgb)
+         return t;
+   if (gl_tint_n == GL_TINTS)
+      return -1;
+   gl_tint_rgb[gl_tint_n] = rgb;
+   return gl_tint_n++;
+}
+
+int dopo_gl_plane_tag(int secnum)
+{
+   const int t = dopo_gl ? gl_tint_block(dopo_sector_lightcolor(secnum)) : -1;
+   return t < 0 ? -1 : -2 - t;
+}
+
+/* a colour table row of the COLORMAP moved into a tint block; others
+ * (another colormap, the palette, a fixed colormap) as they are */
+static int gl_tinted(int row, int tint)
+{
+   if (tint < 0 || fixedcolormap || row < 0 || row >= GL_CMAP_ROWS
+         || cmap_palrow + 1 + (tint + 1) * GL_CMAP_ROWS > cmap_gl_rows)
+      return row;
+   return cmap_palrow + 1 + tint * GL_CMAP_ROWS + row;
 }
 
 /* colour table row of a colormap pointer, -1 when it is not one of ours */
@@ -1463,7 +1606,13 @@ dbool dopo_gl_walls_begin(void)
    view_y0 = (int)(off / SCREENWIDTH);
    replay_stamp++;
    view_active = TRUE;
-   gl_dyn_n = dopo_dynlight_collect(gl_dyn, DOPO_LIGHTS_MAX);
+   gl_lit_programs();   /* prboom-lights or prboom-dynlight may have changed */
+   gl_dyn_n = dopo_dynlight_collect(gl_dyn, gl_dyn_cap);
+   if (gl_dyn_n && gl_dyn_shadows)
+   {
+      dopo_shadowmap_build(gl_dyn, gl_dyn_n, gl_shadow_rows);
+      shadow_dirty = TRUE;
+   }
    gl_dyn_fx = cos(viewangle * (2 * M_PI / 4294967296.0));
    gl_dyn_fy = sin(viewangle * (2 * M_PI / 4294967296.0));
 
@@ -1602,7 +1751,8 @@ static void gl_wall_lit(const draw_column_vars_t *dc, const seg_t *seg)
       const dopo_light_t *l = &gl_dyn[i];
       const double dx = l->x - px, dy = l->y - py;
       const double dz = l->z > ztop ? l->z - ztop : l->z < zbot ? zbot - l->z : 0;
-      if (dx * nx + dy * ny > 0 && dx * dx + dy * dy + dz * dz < (double)l->radius * l->radius)
+      if ((dx * nx + dy * ny > 0 || !l->attenuate)
+            && dx * dx + dy * dy + dz * dz < (double)l->radius * l->radius)
       {
          gl_wlit.on = TRUE;
          gl_wlit.px = (float)px;
@@ -1641,9 +1791,9 @@ static void gl_column_lit(gltex_t *t, const glvert_t *q, int y0, int y1)
    {
       const int edge = i < 2 ? y0 : y1;
       v[i].v = q[i];
-      v[i].p[0] = gl_wlit.px;
-      v[i].p[1] = gl_wlit.py;
-      v[i].p[2] = (float)(-(edge - 0.5 - centery) * gl_wlit.zk);
+      v[i].p[0] = (float)(gl_wlit.px / GL_DYN_UNIT);
+      v[i].p[1] = (float)(gl_wlit.py / GL_DYN_UNIT);
+      v[i].p[2] = (float)(-(edge - 0.5 - centery) * gl_wlit.zk / GL_DYN_UNIT);
       v[i].n[0] = gl_wlit.nx;
       v[i].n[1] = gl_wlit.ny;
       v[i].n[2] = 0;
@@ -1703,9 +1853,9 @@ static void gl_plane_lit(const glpvert_t *q, const double w[2])
    for (i = 0; i < 4; i++)
    {
       v[i].v = q[i];
-      v[i].p[0] = (float)cx[i];
-      v[i].p[1] = (float)cy[i];
-      v[i].p[2] = (float)z;
+      v[i].p[0] = (float)(cx[i] / GL_DYN_UNIT);
+      v[i].p[1] = (float)(cy[i] / GL_DYN_UNIT);
+      v[i].p[2] = (float)(z / GL_DYN_UNIT);
       v[i].n[0] = v[i].n[1] = 0;
       v[i].n[2] = floor_ ? 1.0f : -1.0f;
    }
@@ -1737,7 +1887,7 @@ static uint32_t gl_sprite_lit(const vissprite_t *vis)
       const double dx = l->x - px, dy = l->y - py, dz = l->z - pz;
       const double dist = sqrt(dx * dx + dy * dy + dz * dz);
       double att = 1.0 - dist / l->radius;
-      if (att <= 0)
+      if (att <= 0 || !dopo_shadowmap_lit(i, (float)px, (float)py))
          continue;
       if (eye > 1 && dist > 1 && !(vis->mobjflags & MF_PLAYERSPRITE))
       {
@@ -1767,20 +1917,56 @@ static void gl_bright_uniform(GLint where)
    glUniform2f(where, (float)(row < 0 ? 0 : row), (float)cmap_gl_rows);
 }
 
+/* the frame's shadows into their texture (texture unit 3), once a frame */
+static void gl_shadow_upload(void)
+{
+   static uint8_t la[DOPO_LIGHTS_MAX * DOPO_SHADOW_RAYS * 2];
+   int i;
+   if (!shadow_tex)
+   {
+      glGenTextures(1, &shadow_tex);
+      glBindTexture(GL_TEXTURE_2D, shadow_tex);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, DOPO_SHADOW_RAYS, gl_dyn_cap, 0,
+                   GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, NULL);
+      shadow_dirty = TRUE;
+   }
+   if (shadow_dirty && gl_dyn_n)
+   {
+      for (i = 0; i < gl_dyn_n * DOPO_SHADOW_RAYS; i++)
+      {
+         la[2 * i] = (uint8_t)(gl_shadow_rows[i] >> 8);
+         la[2 * i + 1] = (uint8_t)gl_shadow_rows[i];
+      }
+      glBindTexture(GL_TEXTURE_2D, shadow_tex);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DOPO_SHADOW_RAYS, gl_dyn_n,
+                      GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, la);
+      shadow_dirty = FALSE;
+   }
+   glActiveTexture(GL_TEXTURE0 + 3);
+   glBindTexture(GL_TEXTURE_2D, shadow_tex);
+   glActiveTexture(GL_TEXTURE0);
+}
+
 /* a lit program's view, textures and lights */
 static void gl_lit_set(const gllit_u_t *u, unsigned width, unsigned height, int offset_x)
 {
-   GLfloat pos[4 * DOPO_LIGHTS_MAX], col[3 * DOPO_LIGHTS_MAX];
+   GLfloat pos[4 * DOPO_LIGHTS_MAX], col[4 * DOPO_LIGHTS_MAX];
    int i;
    for (i = 0; i < gl_dyn_n; i++)
    {
-      pos[4 * i + 0] = gl_dyn[i].x;
-      pos[4 * i + 1] = gl_dyn[i].y;
-      pos[4 * i + 2] = gl_dyn[i].z;
-      pos[4 * i + 3] = gl_dyn[i].radius;
-      col[3 * i + 0] = gl_dyn[i].r;
-      col[3 * i + 1] = gl_dyn[i].g;
-      col[3 * i + 2] = gl_dyn[i].b;
+      pos[4 * i + 0] = (GLfloat)(gl_dyn[i].x / GL_DYN_UNIT);
+      pos[4 * i + 1] = (GLfloat)(gl_dyn[i].y / GL_DYN_UNIT);
+      pos[4 * i + 2] = (GLfloat)(gl_dyn[i].z / GL_DYN_UNIT);
+      pos[4 * i + 3] = (GLfloat)(gl_dyn[i].radius / GL_DYN_UNIT);
+      col[4 * i + 0] = gl_dyn[i].r;
+      col[4 * i + 1] = gl_dyn[i].g;
+      col[4 * i + 2] = gl_dyn[i].b;
+      col[4 * i + 3] = gl_dyn[i].attenuate;
    }
    glUniform2f(u->scale, 2.0f / width, 2.0f / height);
    glUniform2f(u->offset, (float)offset_x, 0.0f);
@@ -1791,11 +1977,16 @@ static void gl_lit_set(const gllit_u_t *u, unsigned width, unsigned height, int 
    if (gl_dyn_n)
    {
       glUniform4fv(u->lpos, gl_dyn_n, pos);
-      glUniform3fv(u->lcol, gl_dyn_n, col);
+      glUniform4fv(u->lcol, gl_dyn_n, col);
    }
    glUniform1i(u->lcount, gl_dyn_n);
+   if (gl_dyn_shadows)
+   {
+      glUniform1i(u->shadow, 3);
+      gl_shadow_upload();
+   }
    /* the palette alone: the texel at full brightness */
-   glUniform1f(u->full, (cmap_rows - 1 + 0.5f) / cmap_gl_rows);
+   glUniform1f(u->full, (cmap_palrow + 0.5f) / cmap_gl_rows);
    gl_bright_uniform(u->bright);
 }
 
@@ -1868,7 +2059,9 @@ dbool dopo_gl_wall(const draw_column_vars_t *dc, R_DrawColumn_f fn, int gltex,
       return gl_software(dc->x, dc->x + 1, dc->yl, dc->yh);
    }
    col = (int)(off / p->height);
-   row = R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
+   row = R_WallColumnKernelClass(fn) == 1 ? cmap_palrow : gl_colormap_row(dc->colormap);
+   if (seg && seg->frontsector)
+      row = gl_tinted(row, gl_tint_block(dopo_sector_lightcolor((int)(seg->frontsector - sectors))));
    if (row < 0)
    {
       stat_software++;
@@ -1985,12 +2178,13 @@ static dbool gl_span_quad(const draw_span_vars_t *ds, gltex_t *t, int row)
 
 static void gl_plane_flush(void);
 
-void dopo_gl_plane_begin(fixed_t height, int level)
+void dopo_gl_plane_begin(fixed_t height, int level, int tag)
 {
    gl_plane_flush();
    plane_serial++;
    plane_height = height;
    plane_level  = level;
+   plane_tint   = tag <= -2 ? -2 - tag : -1;
 }
 
 /* a plane's distance at view row y, in map units, as R_MapPlane has it */
@@ -2114,9 +2308,8 @@ static void gl_plane_flush(void)
          c->w = (float)w[i];
          /* light index = distance >> 4 over a 128 wide table */
          c->z = (float)(w[i] / (16.0 * MAXLIGHTZ));
-         c->lev = (uint8_t)plane_run.lev;
-         c->base = (uint8_t)plane_run.base;
-         c->pad[0] = c->pad[1] = 0;
+         c->lev = (uint16_t)plane_run.lev;
+         c->base = (uint16_t)plane_run.base;
       }
    if (gl_dyn_n)
       gl_plane_lit(q, w);
@@ -2141,8 +2334,9 @@ dbool dopo_gl_span(const draw_span_vars_t *ds, int lump)
       return gl_software(ds->x1, ds->x2 + 1, ds->y, ds->y);
    }
    lev  = gl_plane_lev(ds);
-   base = gl_colormap_row(fullcolormap);
-   if (lev < 0 || base < 0 || base > 255)
+   base = gl_tinted(gl_colormap_row(fullcolormap), plane_tint);
+   row = gl_tinted(row, plane_tint);
+   if (lev < 0 || base < 0 || base > 65535)
    {
       if (!gl_span_quad(ds, t, row))
       {
@@ -2291,7 +2485,7 @@ static void gl_draw_planes(unsigned width, unsigned height, int offset_x)
          glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(glpvert_t), b + 4);
          glVertexAttribPointer(2, 1, GL_FLOAT, 0, sizeof(glpvert_t), b + 12);
          glVertexAttribPointer(3, 1, GL_FLOAT, 0, sizeof(glpvert_t), b + 16);
-         glVertexAttribPointer(4, 2, GL_UNSIGNED_BYTE, 0, sizeof(glpvert_t), b + 20);
+         glVertexAttribPointer(4, 2, GL_UNSIGNED_SHORT, 0, sizeof(glpvert_t), b + 20);
          glDrawElements(GL_TRIANGLES, chunk * 6, GL_UNSIGNED_SHORT, 0);
          stat_draws++;
          start += chunk;
@@ -2443,6 +2637,7 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
    masked_kind = GL_KIND_PLAIN;
    masked_corona.on = FALSE;
    masked_light = 0;
+   masked_tint = -1;
    if (!view_active || drawvars.short_topleft != view_topleft)
       return FALSE;
    stat_masked++;
@@ -2483,6 +2678,21 @@ dbool dopo_gl_masked_begin(const rpatch_t *patch, int lump, int texnum,
    masked_kind = fuzz ? GL_KIND_FUZZ
                : style == 2 ? (uint8_t)(GL_KIND_ADD + alpha)
                : style ? (uint8_t)(GL_KIND_LERP + alpha) : GL_KIND_PLAIN;
+   /* the colour of the sector the thing stands in (the weapon: the
+    * player's), once the view has shown a coloured sector */
+   if (vis && !fuzz && gl_tint_n > 0)
+   {
+      const sector_t *sec = NULL;
+      if (vis->mobjflags & MF_PLAYERSPRITE)
+      {
+         if (viewplayer && viewplayer->mo && viewplayer->mo->subsector)
+            sec = viewplayer->mo->subsector->sector;
+      }
+      else
+         sec = R_PointInSubsector(vis->gx, vis->gy)->sector;
+      if (sec)
+         masked_tint = gl_tint_block(dopo_sector_lightcolor((int)(sec - sectors)));
+   }
    /* full bright frames shine on their own, as in GZDoom */
    if (gl_dyn_n && vis && masked_kind == GL_KIND_PLAIN && !emissive)
       masked_light = gl_sprite_lit(vis);
@@ -2571,7 +2781,8 @@ static int gl_masked_row(const draw_column_vars_t *dc, R_DrawColumn_f fn)
 {
    /* a fuzzy thing has no colormap: its own colours, full bright */
    return masked_fuzz ? gl_colormap_row(fullcolormap)
-        : R_WallColumnKernelClass(fn) == 1 ? cmap_rows - 1 : gl_colormap_row(dc->colormap);
+        : R_WallColumnKernelClass(fn) == 1 ? cmap_palrow
+        : gl_tinted(gl_colormap_row(dc->colormap), masked_tint);
 }
 
 /* A sprite column over a texture with coverage (prboom-scale): one quad
@@ -3392,7 +3603,7 @@ static void gl_draw_lit_planes(unsigned width, unsigned height, int offset_x)
          glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(glplvert_t), b + 4);
          glVertexAttribPointer(2, 1, GL_FLOAT, 0, sizeof(glplvert_t), b + 12);
          glVertexAttribPointer(3, 1, GL_FLOAT, 0, sizeof(glplvert_t), b + 16);
-         glVertexAttribPointer(4, 2, GL_UNSIGNED_BYTE, 0, sizeof(glplvert_t), b + 20);
+         glVertexAttribPointer(4, 2, GL_UNSIGNED_SHORT, 0, sizeof(glplvert_t), b + 20);
          glVertexAttribPointer(5, 3, GL_FLOAT, 0, sizeof(glplvert_t), b + 24);
          glVertexAttribPointer(6, 3, GL_FLOAT, 0, sizeof(glplvert_t), b + 36);
          glDrawElements(GL_TRIANGLES, chunk * 6, GL_UNSIGNED_SHORT, 0);
@@ -3858,6 +4069,7 @@ void dopo_gl_present(retro_video_refresh_t video_cb, const void *frame,
    glClear(GL_COLOR_BUFFER_BIT);
 
    view_active = view_software = FALSE;
+   gl_colormap_update();   /* with the tints this frame came across */
    gl_draw_planes(width, height, ((int)width - SCREENWIDTH) / 2);
    gl_draw_scene(width, height, ((int)width - SCREENWIDTH) / 2);
    solid_q.n = masked_q.n = 0;

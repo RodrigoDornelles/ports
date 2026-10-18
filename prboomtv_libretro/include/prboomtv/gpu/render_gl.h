@@ -118,9 +118,10 @@ extern int R_SpanTexture;
 /**
  * @brief R_DoDrawPlane starts making a plane into spans: its height over
  * the view and its light level (the zlight row), for the rectangles the
- * GPU makes of its spans.
+ * GPU makes of its spans; tag, its visplane's skybox field, carries the
+ * colour of its sector's light (prboomtv/gpu/lightcolor.h).
  */
-void dopo_gl_plane_begin(fixed_t height, int level);
+void dopo_gl_plane_begin(fixed_t height, int level, int tag);
 
 /**
  * @brief One floor or ceiling span of the view being replayed, queued for

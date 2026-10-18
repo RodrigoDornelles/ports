@@ -18,6 +18,8 @@
  *   SHOT_NULL_PROC=1  get_proc_address answers NULL, like old Mali EGL
  *   SHOT_EGL=default  skip the surfaceless platform
  *   SHOT_NO_HW=1      refuse the GL context, like a frontend without GL
+ *   SHOT_DESKTOP_GL=1 refuse GLES 2, so the core takes desktop GL (as
+ *                     RetroArch's gl driver gives it)
  * SHOT_INFO=1 shows the core's info log too.
  * SHOT_SLOW_MS=n makes every drawn frame n ms slower (a slow device, for
  * prboom-frameskip=auto); SHOT_SLOW_LOG=1 prints how many were drawn.
@@ -202,6 +204,7 @@ static bool env_cb(unsigned cmd, void *data)
    {
       struct retro_hw_render_callback *cb = (struct retro_hw_render_callback *)data;
       if (getenv("SHOT_NO_HW")
+            || (getenv("SHOT_DESKTOP_GL") && cb->context_type == RETRO_HW_CONTEXT_OPENGLES2)
             || (cb->context_type != RETRO_HW_CONTEXT_OPENGLES2 && cb->context_type != RETRO_HW_CONTEXT_OPENGL))
          return false;
       cb->get_current_framebuffer = hw_get_fbo;
