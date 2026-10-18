@@ -1047,11 +1047,6 @@ dbool dopo_gl_load(retro_environment_t environ_cb)
    if (!environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value)
       var.value = "auto";
    required = !strcmp(var.value, "gl");
-#ifdef __EMSCRIPTEN__
-   /* gl has not been tried in the web frontend yet: auto stays software */
-   if (!required)
-      var.value = "software";
-#endif
    if (!required && strcmp(var.value, "auto"))
    {
       lprintf(LO_INFO, "prboom-render software\n");
