@@ -74,6 +74,12 @@
       background: #000;
     }
 
+    /* banners drawn at higher resolution than the title screens */
+    .port img.smooth {
+      object-fit: cover;
+      image-rendering: auto;
+    }
+
     .body {
       display: flex;
       flex: 1;
@@ -119,6 +125,16 @@
             <h2>PrBoomTV</h2>
             <p>Doom, Heretic, Freedoom and more on PrBoom, with OpenGL lights, widescreen and online multiplayer.</p>
             <a class="play" href="prboomtv/">Play</a>
+          </div>
+        </article>
+      </li>
+      <li>
+        <article class="port">
+          <img class="smooth" src="balatro/banner.jpeg" alt="Balatro logo with playing cards" loading="lazy">
+          <div class="body">
+            <h2>Balatro</h2>
+            <p>Patch your own Balatro for TV boxes and handhelds: lighter textures, fonts and shaders, right in the browser.</p>
+            <a class="play" href="balatro/">Patch</a>
           </div>
         </article>
       </li>

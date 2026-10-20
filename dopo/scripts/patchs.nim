@@ -25,11 +25,16 @@
 ##   ...code...
 ##   --! @endpatch
 ##
+## as in GLSL (*.fs, *.vs, *.glsl) with //! comments.
+##
 ## The doc comment may carry any other description; code sharing a line with
 ## the end marker (or, in C, with the opening comment's close) belongs to the
 ## hunk. Everything outside hunks is ignored. Line numbers always refer to the
 ## pristine upstream file, no matter how many hunks touch it; hunks that
 ## overlap each other are rejected instead of silently clobbering one another.
+##
+## A comment may instead list files to drop from the tree, "@delete <file>"
+## each, which only the browser's entry point (dopoPatchs) can do.
 ##
 ## Every patched file is written to <output>/<path>, the C ones with #line
 ## markers that point back to the upstream file and to the patch, so
@@ -45,7 +50,7 @@ type
   PatchError* = object of CatchableError
 
   Syntax* = enum
-    syntaxC, syntaxLua
+    syntaxC, syntaxLua, syntaxGlsl
 
   Hunk* = object
     patch*: string    ## patch file the hunk came from
@@ -55,8 +60,11 @@ type
     last*: int        ## last replaced line, -1 = insertion
     body*: seq[string]
 
-  ## upstream path (relative, / separated) -> hunks in declaration order
-  Hunks* = Table[string, seq[Hunk]]
+  Patchset* = object
+    ## upstream path (relative, / separated) -> hunks in declaration order
+    hunks*: Table[string, seq[Hunk]]
+    ## upstream path -> where the first @delete of it is
+    deletes*: Table[string, string]
 
 proc fail(message: string) {.noreturn.} =
   raise newException(PatchError, message)
@@ -70,12 +78,21 @@ func span(hunk: Hunk): string =
   else: "lines " & $hunk.first & "-" & $hunk.last
 
 func syntaxOf*(path: string): Syntax =
-  if path.endsWith(".lua"): syntaxLua else: syntaxC
+  if path.endsWith(".lua"): syntaxLua
+  elif path.endsWith(".fs") or path.endsWith(".vs") or path.endsWith(".glsl"): syntaxGlsl
+  else: syntaxC
+
+## the line comment that carries the directives, for the syntaxes that use one
+func prefix(syntax: Syntax): string =
+  case syntax
+  of syntaxC: ""
+  of syntaxLua: "--!"
+  of syntaxGlsl: "//!"
 
 func endText(syntax: Syntax): string =
   case syntax
   of syntaxC: "/* @endpatch */"
-  of syntaxLua: "--! @endpatch"
+  of syntaxLua, syntaxGlsl: syntax.prefix & " @endpatch"
 
 ## lines as getline reads them: the final newline ends the last line instead
 ## of opening an empty one, and a \r before the newline goes
@@ -86,6 +103,12 @@ func toLines*(text: string): seq[string] =
   for line in result.mitems:
     if line.endsWith('\r'):
       line.setLen(line.len - 1)
+
+## how text breaks its lines, by its first break, and whether it ends in one
+func lineEnding*(text: string): tuple[newline: string, final: bool] =
+  let at = text.find('\n')
+  result.newline = if at > 0 and text[at - 1] == '\r': "\r\n" else: "\n"
+  result.final = text.len == 0 or text.endsWith('\n')
 
 func skip(text: string, at: int, chars: set[char]): int =
   result = at
@@ -126,6 +149,18 @@ func parseDirective(comment: string): Directive =
           return (true, at, comment[name ..< nameEnd], first, last)
     at = comment.find("@patch", at + 1)
 
+## every "@delete <file>" of a doc comment, with its offset; none when one
+## is malformed
+func parseDeletes(comment: string): seq[tuple[at: int, target: string]] =
+  var at = comment.find("@delete")
+  while at >= 0:
+    let name = skip(comment, at + "@delete".len, Whitespace)
+    let nameEnd = skip(comment, name, AllChars - Whitespace)
+    if name == at + "@delete".len or nameEnd == name:
+      return @[]
+    result.add (at, comment[name ..< nameEnd])
+    at = comment.find("@delete", nameEnd)
+
 ## where the end marker starts in text, -1 when it has none
 func endMarker(text: string, syntax: Syntax): int =
   case syntax
@@ -138,18 +173,19 @@ func endMarker(text: string, syntax: Syntax): int =
         if text.continuesWith("*/", i):
           return at
       at = text.find("/*", at + 1)
-  of syntaxLua:
-    var at = text.find("--!")
+  of syntaxLua, syntaxGlsl:
+    let prefix = syntax.prefix
+    var at = text.find(prefix)
     while at >= 0:
-      let word = skip(text, at + 3, Whitespace)
+      let word = skip(text, at + prefix.len, Whitespace)
       let after = word + "@endpatch".len
       if text.continuesWith("@endpatch", word) and (after >= text.len or text[after] notin IdentChars):
         return at
-      at = text.find("--!", at + 1)
+      at = text.find(prefix, at + 1)
   -1
 
-func isLuaComment(line: string): bool =
-  line.strip(trailing = false).startsWith("--!")
+func isDirectiveComment(line: string, syntax: Syntax): bool =
+  line.strip(trailing = false).startsWith(syntax.prefix)
 
 func checkedTarget(patch: string, lineno: int, raw: string): string =
   var parts: seq[string]
@@ -183,8 +219,8 @@ proc feed(hunk: var Hunk, text: string, lineno: int, syntax: Syntax): bool =
     hunk.start = lineno
   hunk.body.add text
 
-## adds the hunks of patch, whose content is text, to hunks
-proc parsePatch*(hunks: var Hunks, patch, text: string) =
+## adds the hunks and deletes of patch, whose content is text, to patchset
+proc parsePatch*(patchset: var Patchset, patch, text: string) =
   let syntax = syntaxOf(patch)
   let lines = toLines(text)
   template failAt(lineno: int, what: string) =
@@ -194,7 +230,7 @@ proc parsePatch*(hunks: var Hunks, patch, text: string) =
   var target = ""
   var open = false
   template close() =
-    hunks.mgetOrPut(target, @[]).add current
+    patchset.hunks.mgetOrPut(target, @[]).add current
     open = false
 
   var index = 0
@@ -235,25 +271,39 @@ proc parsePatch*(hunks: var Hunks, patch, text: string) =
       if closing < 0:
         failAt(lineno, "unterminated /** comment")
       rest = lines[closeIndex][closing + 2 .. ^1]
-    of syntaxLua:
-      if not line.isLuaComment:
+    of syntaxLua, syntaxGlsl:
+      if not line.isDirectiveComment(syntax):
         if line.mentions("@endpatch"):
           failAt(lineno, "@endpatch without a matching @patch")
         inc index
         continue
-      # a run of --! lines; an end marker stops it, so a hunk may be empty
-      while closeIndex < lines.len and lines[closeIndex].isLuaComment and
+      # a run of --! (//!) lines; an end marker stops it, so a hunk may be
+      # empty
+      while closeIndex < lines.len and lines[closeIndex].isDirectiveComment(syntax) and
           (closeIndex == index or endMarker(lines[closeIndex], syntax) < 0):
-        comment.add lines[closeIndex].strip(trailing = false)[3 .. ^1]
+        comment.add lines[closeIndex].strip(trailing = false)[syntax.prefix.len .. ^1]
         comment.add '\n'
         inc closeIndex
       dec closeIndex
 
     let directive = parseDirective(comment)
+    if comment.mentions("@delete"):
+      let deletes = parseDeletes(comment)
+      if deletes.len == 0:
+        failAt(lineno, "malformed directive, expected '@delete <file>'")
+      if directive.found:
+        failAt(lineno, "@patch and @delete in the same comment")
+      for (at, raw) in deletes:
+        let deleteLine = lineno + comment[0 ..< at].count('\n')
+        let path = checkedTarget(patch, deleteLine, raw)
+        if path notin patchset.deletes:
+          patchset.deletes[path] = patch & ":" & $deleteLine
+      index = closeIndex + 1
+      continue
     if not directive.found:
       if comment.mentions("@patch"):
         failAt(lineno, "malformed directive, expected '@patch <file> <line>[-<line>]'")
-      if syntax == syntaxLua and comment.mentions("@endpatch"):
+      if syntax != syntaxC and comment.mentions("@endpatch"):
         failAt(lineno, "@endpatch without a matching @patch")
       index = closeIndex + 1
       continue
@@ -272,16 +322,8 @@ proc parsePatch*(hunks: var Hunks, patch, text: string) =
   if open:
     failAt(current.directive, "missing " & syntax.endText)
 
-## rejects the hunks of target, which has count lines, that fall out of it
-## or overlap each other
-proc validate*(target: string, hunks: seq[Hunk], count: int) =
-  for hunk in hunks:
-    let limit = if hunk.insertion: count + 1 else: count
-    let last = if hunk.insertion: hunk.first else: hunk.last
-    if hunk.first == 0 or last < hunk.first or last > limit:
-      fail hunk.where & ": error: " & hunk.span & " is out of range, " & target &
-        " has " & $count & " lines"
-
+## rejects the hunks of one file that overlap each other
+proc checkOverlaps*(hunks: seq[Hunk]) =
   var replaces: seq[Hunk]
   for hunk in hunks:
     if not hunk.insertion:
@@ -301,6 +343,17 @@ proc validate*(target: string, hunks: seq[Hunk], count: int) =
           fail hunk.where & ": error: " & hunk.span & " falls inside " & replace.span &
             " from " & replace.where
 
+## rejects the hunks of target, which has count lines, that fall out of it
+## or overlap each other
+proc validate*(target: string, hunks: seq[Hunk], count: int) =
+  for hunk in hunks:
+    let limit = if hunk.insertion: count + 1 else: count
+    let last = if hunk.insertion: hunk.first else: hunk.last
+    if hunk.first == 0 or last < hunk.first or last > limit:
+      fail hunk.where & ": error: " & hunk.span & " is out of range, " & target &
+        " has " & $count & " lines"
+  checkOverlaps(hunks)
+
 func quoted(path: string): string =
   result = "\""
   for c in path:
@@ -309,9 +362,11 @@ func quoted(path: string): string =
     result.add c
   result.add '"'
 
-## target (original's path upstream) with its lines and hunks applied; the
-## #line markers of C files name original and the patches as they are given
-proc apply*(original, target: string, lines: seq[string], hunks: seq[Hunk]): string =
+## target (original's path upstream) with its lines and hunks applied, its
+## line breaks as ending tells; the #line markers of C files name original
+## and the patches as they are given
+proc apply*(original, target: string, lines: seq[string], hunks: seq[Hunk],
+            ending = (newline: "\n", final: true)): string =
   # insertions go before a replacement starting on the same line; ties keep
   # declaration order (sort is stable)
   var hunks = hunks
@@ -319,16 +374,18 @@ proc apply*(original, target: string, lines: seq[string], hunks: seq[Hunk]): str
     if a.first != b.first: cmp(a.first, b.first)
     else: cmp(ord(not a.insertion), ord(not b.insertion)))
 
-  let markers = syntaxOf(target) == syntaxC
+  var markers = false
+  for ext in [".c", ".h", ".cc", ".cpp", ".hpp"]:
+    markers = markers or target.endsWith(ext)
   var output = ""
   var continued = false # a #line can not break a backslash continuation
   template emit(text: string) =
     output.add text
-    output.add '\n'
+    output.add ending.newline
     continued = text.endsWith('\\')
   template mark(lineno: int, file: string) =
     if markers and not continued:
-      output.add "#line " & $lineno & " " & quoted(file) & "\n"
+      output.add "#line " & $lineno & " " & quoted(file) & ending.newline
 
   mark(1, original)
 
@@ -348,7 +405,68 @@ proc apply*(original, target: string, lines: seq[string], hunks: seq[Hunk]): str
     if line <= lines.len:
       emit(lines[line - 1])
     inc line
+  if not ending.final and output.endsWith(ending.newline):
+    output.setLen(output.len - ending.newline.len)
   output
+
+## the patched files of patchset, sorted; a file can not be both patched
+## and deleted
+proc targets*(patchset: Patchset): seq[string] =
+  for target, list in patchset.hunks:
+    if target in patchset.deletes:
+      fail list[0].where & ": error: '" & target & "' is deleted by " & patchset.deletes[target]
+    result.add target
+  result.sort()
+
+when defined(js):
+  import std/[json, sets]
+
+  ## the browser's entry point, JSON in and out: {"patches": [{"name",
+  ## "text"}], "paths": [every upstream file], "files": {path: text}} gets
+  ## {"targets", "deletes", "files": {path: patched text}}, or {"error"};
+  ## without "files" the patches are only parsed and checked against each
+  ## other
+  proc dopoPatchs(request: cstring): cstring {.exportc.} =
+    var response = newJObject()
+    try:
+      let request = parseJson($request)
+      var patchset: Patchset
+      for patch in request["patches"]:
+        patchset.parsePatch(patch["name"].getStr, patch["text"].getStr)
+
+      let targets = patchset.targets
+      var deletes: seq[string]
+      for path in patchset.deletes.keys:
+        deletes.add path
+      deletes.sort()
+      response["targets"] = %targets
+      response["deletes"] = %deletes
+
+      if not request.hasKey("files"):
+        for target in targets:
+          checkOverlaps(patchset.hunks[target])
+      else:
+        var paths: HashSet[string]
+        for path in request["paths"]:
+          paths.incl path.getStr
+        for path in deletes:
+          if path notin paths:
+            fail patchset.deletes[path] & ": error: '" & path & "' does not exist upstream"
+
+        let sources = request["files"]
+        var files = newJObject()
+        for target in targets:
+          let list = patchset.hunks[target]
+          if not sources.hasKey(target):
+            fail list[0].where & ": error: '" & target & "' does not exist upstream"
+          let text = sources[target].getStr
+          let lines = toLines(text)
+          validate(target, list, lines.len)
+          files[target] = %apply(target, target, lines, list, lineEnding(text))
+        response["files"] = files
+    except CatchableError as e:
+      response = %*{"error": e.msg}
+    cstring($response)
 
 when isMainModule and not defined(js):
   import std/[os, sets]
@@ -397,27 +515,25 @@ when isMainModule and not defined(js):
     # deterministic order no matter how the shell or cmake listed them
     patches.sort()
 
-    var hunks: Hunks
+    var patchset: Patchset
     for patch in patches:
-      hunks.parsePatch(patch, load(patch))
-
-    var targets: seq[string]
-    for target in hunks.keys:
-      targets.add target
-    targets.sort()
+      patchset.parsePatch(patch, load(patch))
+    for path, where in patchset.deletes:
+      fail where & ": error: @delete of '" & path & "' needs the whole tree, not an output dir"
 
     var generated: HashSet[string]
-    for target in targets:
-      let list = hunks[target]
+    for target in patchset.targets:
+      let list = patchset.hunks[target]
       let original = absolutePath(source / target)
       if not fileExists(original):
         fail list[0].where & ": error: '" & target & "' does not exist upstream"
 
-      let lines = toLines(load(original))
+      let text = load(original)
+      let lines = toLines(text)
       validate(target, list, lines.len)
 
       let destination = output / target
-      writeChanged(destination, apply(original, target, lines, list))
+      writeChanged(destination, apply(original, target, lines, list, lineEnding(text)))
       generated.incl destination
       stdout.writeLine target
 

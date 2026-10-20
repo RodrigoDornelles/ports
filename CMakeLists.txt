@@ -24,6 +24,7 @@ set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 option(PORTS_USE_SDL_LIBRETRO "build sdl_libretro core (libretro backend + sdl2/jack frontends)" ON)
 option(PORTS_USE_PRBOOMTV_LIBRETRO "build prboomtv_libretro core (prboom patched for tv)" ON)
 option(PORTS_USE_RETROARCH "build RetroArch's web player with the cores (wasm only)" ${PORTS_WASM})
+option(DOPO_USE_BALATRO_WEB_PATCH "build the Balatro patcher page" OFF)
 
 include(dopo/cmake/dopo.cmake)
 
@@ -35,6 +36,10 @@ if (EMSCRIPTEN)
         COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/www/index.html" "${PORTS_DIST}/index.html"
         DEPENDS "${DOPO_DIR}/www/index.html")
     add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")
+endif()
+
+if (DOPO_USE_BALATRO_WEB_PATCH)
+    include(dopo/cmake/balatro.cmake)
 endif()
 
 if (PORTS_USE_SDL_LIBRETRO)
