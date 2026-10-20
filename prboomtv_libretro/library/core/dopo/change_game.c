@@ -29,18 +29,28 @@ static char dopo_games[DOPO_GAMES_MAX][DOPO_GAME_PATH];
 static int  dopo_games_count;
 
 /**
- * @brief Whether a file can be offered as a game: an m3u playlist, or a
- * .wad/.iwad/.pwad whose header says IWAD or PWAD.
+ * @brief Whether a file can be offered as a game: an m3u playlist, a
+ * .wad/.iwad/.pwad whose header says IWAD or PWAD, or one gzip'd
+ * (doom1.wad.gz), told by its gzip magic without inflating it.
  */
 static dbool dopo_game_candidate(const char *path)
 {
    const char *ext = path_get_extension(path);
+   char inner[DOPO_GAME_PATH];
    char magic[4];
    RFILE *fp;
+   dbool gz;
    dbool ok;
 
    if (!strcasecmp(ext, "m3u"))
       return TRUE;
+   gz = !strcasecmp(ext, "gz");
+   if (gz)
+   {
+      strlcpy(inner, path, sizeof(inner));
+      path_remove_extension(inner);
+      ext = path_get_extension(inner);
+   }
    if (strcasecmp(ext, "wad") && strcasecmp(ext, "iwad") && strcasecmp(ext, "pwad"))
       return FALSE;
 
@@ -48,7 +58,8 @@ static dbool dopo_game_candidate(const char *path)
    if (!fp)
       return FALSE;
    ok = filestream_read(fp, magic, sizeof(magic)) == sizeof(magic) &&
-        (!memcmp(magic, "IWAD", 4) || !memcmp(magic, "PWAD", 4));
+        (gz ? (unsigned char)magic[0] == 0x1f && (unsigned char)magic[1] == 0x8b
+            : !memcmp(magic, "IWAD", 4) || !memcmp(magic, "PWAD", 4));
    filestream_close(fp);
    return ok;
 }
