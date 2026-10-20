@@ -257,7 +257,7 @@ set(prboomtv_upstream_files
 )
 
 if (EMSCRIPTEN)
-    # linked into RetroArch (retroarch/cmake/retroarch.cmake), which brings
+    # linked into RetroArch (dopo/cmake/retroarch.cmake), which brings
     # its own libretro-common, as upstream's STATIC_LINKING does; and no
     # threads, so the page needs no SharedArrayBuffer
     list(REMOVE_ITEM prboomtv_upstream_files
