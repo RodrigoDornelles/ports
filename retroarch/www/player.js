@@ -15,6 +15,9 @@ const TRYSTERO = 'https://esm.sh/@trystero-p2p/nostr@0.25.4';
 
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 
+/* every core's rooms live under this Trystero app (peer.js, rooms.js) */
+const APP_ID = 'dopo';
+
 const HOME = '/home/web_user/retroarch';
 const USERDATA = `${HOME}/userdata`;
 const CONFIG = `${USERDATA}/retroarch.cfg`;
@@ -68,6 +71,54 @@ async function fetchContent(url, progress) {
   return data;
 }
 
+/** A playlist line as a path under the content folder; one that is
+ * absolute or climbs out of it is refused. */
+function contentPath(line) {
+  const parts = [];
+  for (const part of line.replace(/\\/g, '/').split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (!parts.length) throw new Error(`${line}: outside the playlist's folder`);
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  if (/^[a-z]:/i.test(line) || line.startsWith('/') || !parts.length)
+    throw new Error(`${line}: not a path relative to the playlist`);
+  return parts.join('/');
+}
+
+/**
+ * The files of the content, as [{ path, data }], the content first: an
+ * m3u playlist with every file it lists, fetched relative to it and kept
+ * at the same relative paths, so the core resolves the playlist as on
+ * disk; any other content alone.
+ */
+async function fetchFiles(content, progress) {
+  const url = new URL(content, location.href);
+  const name = decodeURIComponent(url.pathname.split('/').pop());
+  if (!/\.m3u$/i.test(name))
+    return [{ path: name, data: await fetchContent(url, progress) }];
+
+  const playlist = await fetchContent(url);
+  const lines = new TextDecoder().decode(playlist).split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const loaded = new Map();
+  const totals = new Map();
+  const sum = (map) => [...map.values()].reduce((a, b) => a + b, 0);
+  const files = await Promise.all(lines.map(async (line) => ({
+    path: contentPath(line),
+    data: await fetchContent(new URL(line, url), (done, total) => {
+      loaded.set(line, done);
+      totals.set(line, total);
+      progress?.(sum(loaded), sum(totals));
+    }),
+  })));
+  return [{ path: name, data: playlist }, ...files];
+}
+
 /** TURN servers from url, [] when there are none. */
 async function turnServers(url) {
   try {
@@ -91,7 +142,8 @@ function sync(FS, populate) {
  * Starts RetroArch on canvas.
  *
  * core:     URL of <core>_libretro.js
- * content:  URL of the content, written under its own file name
+ * content:  URL of the content, written under its own file name; an m3u
+ *           playlist brings the files it lists, at their relative paths
  * nick:     netplay nickname
  * config:   more retroarch.cfg values
  * options:  core options, { 'prboom-glow': '1' } (default: the ones in
@@ -102,10 +154,9 @@ function sync(FS, populate) {
  */
 export async function play({ canvas, core, content, nick, config = {}, options = coreOptions(),
                             turn, progress }) {
-  const name = decodeURIComponent(new URL(content, location.href).pathname.split('/').pop());
   const coreUrl = new URL(core, location.href);
-  const [data, { default: factory }, trystero, iceServers] = await Promise.all([
-    fetchContent(content, progress),
+  const [files, { default: factory }, trystero, iceServers] = await Promise.all([
+    fetchFiles(content, progress),
     import(coreUrl.href),
     import(TRYSTERO),
     turn ? turnServers(turn) : [],
@@ -118,7 +169,7 @@ export async function play({ canvas, core, content, nick, config = {}, options =
     printErr: (text) => console.warn(text),
     dopo: {
       trystero: { joinRoom: trystero.joinRoom, selfId: trystero.selfId },
-      appId: 'dopo',
+      appId: APP_ID,
       /* the lobby room: rooms of this core only */
       core: coreUrl.pathname.split('/').pop().replace(/_libretro\.js$/, ''),
       rtc: { iceServers: [...STUN, ...iceServers] },
@@ -145,7 +196,11 @@ export async function play({ canvas, core, content, nick, config = {}, options =
   }));
   /* only the page's options; the rest take the core's defaults */
   FS.writeFile(CORE_OPTIONS, setConfig('', options));
-  FS.writeFile(`${HOME}/content/${name}`, data);
+  for (const { path, data } of files) {
+    const file = `${HOME}/content/${path}`;
+    FS.mkdirTree(file.slice(0, file.lastIndexOf('/')));
+    FS.writeFile(file, data);
+  }
 
   /* userdata back to IndexedDB now and then, and when the page goes */
   const save = () => sync(FS, false);
@@ -156,8 +211,48 @@ export async function play({ canvas, core, content, nick, config = {}, options =
   });
 
   canvas.focus();
-  module.callMain(['-v', `${HOME}/content/${name}`, '-c', CONFIG]);
+  module.callMain(['-v', `${HOME}/content/${files[0].path}`, '-c', CONFIG]);
   return module;
+}
+
+/**
+ * Listens to the rooms the hosts of a core announce in its lobby
+ * (retroarch/source/rooms.js), without hosting or joining any: a page
+ * outside the game can show who is playing. onChange gets the open
+ * rooms, [{ peer, game, players }] (game: the content's name, doom1 for
+ * doom1.m3u), on every change and as rooms go stale. Returns a function
+ * that leaves the lobby.
+ */
+export async function watchLobby(core, onChange) {
+  const STALE = 30000; /* rooms.js: a host repeats its room every 10 s */
+  const { joinRoom } = await import(TRYSTERO);
+  const lobby = joinRoom({ appId: APP_ID, rtcConfig: { iceServers: STUN } }, `lobby-${core}`);
+  const net = lobby.makeAction('room');
+  const rooms = new Map();
+  const report = () => {
+    const now = Date.now();
+    for (const [peer, room] of rooms)
+      if (now - room.seen > STALE) rooms.delete(peer);
+    onChange([...rooms].map(([peer, { fields }]) => ({
+      peer,
+      game: String(fields.game_name ?? '').split(/[\\/]/).pop(),
+      players: Math.max(1, Number(fields.player_count) || 1),
+    })));
+  };
+  net.onMessage = (fields, meta) => {
+    if (fields && typeof fields === 'object') rooms.set(meta.peerId, { fields, seen: Date.now() });
+    else rooms.delete(meta.peerId);
+    report();
+  };
+  lobby.onPeerLeave = (peer) => {
+    if (rooms.delete(peer)) report();
+  };
+  const timer = setInterval(report, 5000);
+  report();
+  return () => {
+    clearInterval(timer);
+    lobby.leave();
+  };
 }
 
 /** The page's hash as parameters: #nick=rodrigo */
