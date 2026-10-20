@@ -149,7 +149,6 @@
       tags.className = 'tags';
       if (game.demo) tags.append(tag('Demo'));
       if (game.y90) tags.append(tag('90s'));
-      if (game.modes?.length === 1 && game.modes[0] === 'dm') tags.append(tag('Deathmatch only'));
       card.append(radio, art, playing, name, tags);
       card.addEventListener('dblclick', () => form.requestSubmit());
       list.append(card);
