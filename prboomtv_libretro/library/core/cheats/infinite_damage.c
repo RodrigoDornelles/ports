@@ -7,7 +7,7 @@
  * hits whose source is a player on anything that is not a player. The
  * raise is twice the target's health, so halving rules (Heretic/Hexen)
  * still kill; immunities in the upstream body are still honored. In a
- * netgame the host sets it for every player (multiplayer/settings.c).
+ * netgame the host sets it for every player (enhancements/multiplayer/settings.c).
  */
 
 /**

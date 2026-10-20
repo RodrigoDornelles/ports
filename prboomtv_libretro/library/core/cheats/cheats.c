@@ -2,7 +2,7 @@
  * @brief Cheats toggled from Dopo Options > Cheats: infinite ammo,
  * infinite life and all weapons, kept up for every player at the start of
  * every tic a level is played (never during demos). In a netgame the host
- * sets them for everyone (multiplayer/settings.c).
+ * sets them for everyone (enhancements/multiplayer/settings.c).
  */
 #include "doomstat.h"
 #include "d_player.h"

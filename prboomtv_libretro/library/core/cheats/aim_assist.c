@@ -10,7 +10,7 @@
  * within its opening.
  * Both skip friends and anything that is not a monster (barrels), and are
  * off in demos. In a netgame the host sets them for every player
- * (multiplayer/settings.c).
+ * (enhancements/multiplayer/settings.c).
  */
 
 /**

@@ -1,0 +1,86 @@
+// Built-in dynamic lights for Doom (prboom-dynlight, hd/dynlights.c), in
+// GZDoom's GLDEFS format: used where neither lights.pk3 nor the wads name
+// a light. Radii are GZDoom sizes (the reach is twice the size).
+
+// projectiles: while they fly, then their burst
+pointlight DL_IMPBALL { color 1.0 0.5 0.1 size 64 }
+flickerlight DL_IMPBALL_X { color 0.8 0.3 0.0 size 80 secondarysize 96 chance 0.4 }
+pointlight DL_CACOBALL { color 0.9 0.3 0.9 size 64 }
+flickerlight DL_CACOBALL_X { color 0.7 0.2 0.7 size 80 secondarysize 96 chance 0.4 }
+pointlight DL_BARONBALL { color 0.3 1.0 0.3 size 64 }
+flickerlight DL_BARONBALL_X { color 0.2 0.8 0.2 size 80 secondarysize 96 chance 0.4 }
+pointlight DL_PLASMA { color 0.3 0.5 1.0 size 56 }
+flickerlight DL_PLASMA_X { color 0.3 0.4 1.0 size 72 secondarysize 84 chance 0.4 }
+pointlight DL_BFG { color 0.3 1.0 0.3 size 120 }
+flickerlight DL_BFG_X { color 0.3 1.0 0.3 size 160 secondarysize 180 chance 0.4 }
+pointlight DL_ROCKET { color 1.0 0.7 0.2 size 64 }
+flickerlight DL_BLAST { color 1.0 0.6 0.2 size 112 secondarysize 128 chance 0.3 }
+
+// muzzle flashes (a little ahead of the shooter, where the gun points)
+// and the lost soul's flames
+pointlight DL_FLASH { color 1.0 0.8 0.4 size 96 offset 24 40 0 }
+pointlight DL_ZOMBIEFLASH { color 1.0 0.8 0.4 size 64 offset 28 36 0 }
+flickerlight DL_SKULL { color 1.0 0.5 0.1 size 48 secondarysize 56 chance 0.5 }
+
+// torches and lamps (prboom-dynlight 2)
+flickerlight2 DL_REDTORCH { color 0.8 0.35 0.15 size 72 secondarysize 80 interval 0.1 offset 0 56 0 }
+flickerlight2 DL_GREENTORCH { color 0.2 0.8 0.2 size 72 secondarysize 80 interval 0.1 offset 0 56 0 }
+flickerlight2 DL_BLUETORCH { color 0.2 0.3 0.9 size 72 secondarysize 80 interval 0.1 offset 0 56 0 }
+flickerlight2 DL_FIREBARREL { color 1.0 0.6 0.2 size 64 secondarysize 72 interval 0.1 offset 0 32 0 }
+pointlight DL_LAMP { color 0.9 0.9 0.6 size 72 offset 0 44 0 }
+pointlight DL_TECHLAMP { color 0.7 0.8 1.0 size 80 offset 0 64 0 }
+
+object Projectiles
+{
+   frame BAL1A { light DL_IMPBALL }
+   frame BAL1B { light DL_IMPBALL }
+   frame BAL1C { light DL_IMPBALL_X }
+   frame BAL1D { light DL_IMPBALL_X }
+   frame BAL1E { light DL_IMPBALL_X }
+   frame BAL2A { light DL_CACOBALL }
+   frame BAL2B { light DL_CACOBALL }
+   frame BAL2C { light DL_CACOBALL_X }
+   frame BAL2D { light DL_CACOBALL_X }
+   frame BAL2E { light DL_CACOBALL_X }
+   frame BAL7A { light DL_BARONBALL }
+   frame BAL7B { light DL_BARONBALL }
+   frame BAL7C { light DL_BARONBALL_X }
+   frame BAL7D { light DL_BARONBALL_X }
+   frame BAL7E { light DL_BARONBALL_X }
+   frame PLSS { light DL_PLASMA }
+   frame PLSE { light DL_PLASMA_X }
+   frame APLS { light DL_PLASMA }
+   frame APBX { light DL_PLASMA_X }
+   frame BFS1 { light DL_BFG }
+   frame BFE1 { light DL_BFG_X }
+   frame MANF { light DL_IMPBALL }
+   frame MISLA { light DL_ROCKET }
+   frame MISLB { light DL_BLAST }
+   frame MISLC { light DL_BLAST }
+   frame MISLD { light DL_BLAST }
+   frame FBXP { light DL_BLAST }
+   frame BEXPC { light DL_BLAST }
+   frame BEXPD { light DL_BLAST }
+   frame BEXPE { light DL_BLAST }
+   frame FIRE { light DL_BLAST }
+}
+
+object Attacks
+{
+   frame PLAYF { light DL_FLASH }
+   frame POSSF { light DL_ZOMBIEFLASH }
+   frame SPOSF { light DL_ZOMBIEFLASH }
+   frame CPOSE { light DL_ZOMBIEFLASH }
+   frame CPOSF { light DL_ZOMBIEFLASH }
+   frame SKUL { light DL_SKULL }
+}
+
+object Decorations
+{
+   frame TRED { light DL_REDTORCH }
+   frame TGRN { light DL_GREENTORCH }
+   frame TBLU { light DL_BLUETORCH }
+   frame FCAN { light DL_FIREBARREL }
+   frame COLU { light DL_LAMP }
+   frame TLMP { light DL_TECHLAMP }
+}

@@ -54,7 +54,7 @@ typedef struct
 
 /**
  * @brief The frontend's environment call (libretro.c, through
- * multiplayer/interface/dopo/environment.c).
+ * enhancements/multiplayer/interface/dopo/environment.c).
  */
 dbool dopo_environment(unsigned cmd, void *data);
 

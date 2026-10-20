@@ -7,16 +7,16 @@
 
 #include "doomtype.h"
 
-/** @brief Contextual action button (patchs/action_button.c). */
+/** @brief Contextual action button (patchs/tv/action_button.c). */
 extern dbool dopo_action_button;
 
-/** @brief Auto Fist (patchs/auto_fist.c). */
+/** @brief Auto Fist (patchs/tv/auto_fist.c). */
 extern dbool dopo_auto_fist;
 
-/** @brief Toggle Fire (patchs/toggle_fire.c). */
+/** @brief Toggle Fire (patchs/tv/toggle_fire.c). */
 extern dbool dopo_toggle_fire;
 
-/** @brief Side Walk window in milliseconds, 0 = off (patchs/side_walk.c). */
+/** @brief Side Walk window in milliseconds, 0 = off (patchs/tv/side_walk.c). */
 extern int dopo_side_walk_ms;
 
 #endif

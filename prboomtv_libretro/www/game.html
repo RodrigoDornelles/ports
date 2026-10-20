@@ -4,28 +4,47 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>@GAME_TITLE@ - PrBoomTV</title>
-  <link rel="stylesheet" href="../style.css">
+  <meta name="description" content="Play @GAME_TITLE@ in the browser with PrBoomTV, alone or with friends.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="@GAME_TITLE@">
+  <meta property="og:description" content="Play @GAME_TITLE@ in the browser with PrBoomTV, alone or with friends.">
+  <meta property="og:image" content="@GAME_BANNER@">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="prboomtv:content" content="@GAME_CONTENT@">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body class="play">
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-  <p id="status">Loading @GAME_TITLE@...</p>
+  <div id="loading">
+    <img class="banner" src="@GAME_BANNER@" alt="">
+    <p id="status">Loading @GAME_TITLE@...</p>
+  </div>
 
   <script type="module">
-    import { play, hashParams } from '../../retroarch/player.js';
+    import { play, hashParams, coreOptions, loadOptions } from '../retroarch/player.js';
 
+    const title = document.querySelector('meta[property="og:title"]').content;
+    const content = document.querySelector('meta[name="prboomtv:content"]').content;
+    const loading = document.getElementById('loading');
     const status = document.getElementById('status');
+
+    const defaults = await loadOptions('defaults.txt').catch((e) => {
+      console.warn('[prboomtv]', e);
+      return {};
+    });
 
     /* the sound starts with the first key or click: browsers hold audio
      * back until the page is interacted with */
     play({
       canvas: document.getElementById('canvas'),
-      core: '../prboomtv_libretro.js',
-      content: '../roms/@GAME_ID@.wad',
+      core: 'prboomtv_libretro.js',
+      content,
+      options: { ...defaults, ...coreOptions() },
       nick: hashParams().get('nick') || '',
       progress: (loaded, total) => {
-        if (total) status.textContent = `Loading @GAME_TITLE@... ${Math.round(loaded * 100 / total)}%`;
+        if (total) status.textContent = `Loading ${title}... ${Math.min(100, Math.round(loaded * 100 / total))}%`;
       },
-    }).then(() => status.remove(), (e) => {
+    }).then(() => loading.remove(), (e) => {
       console.error(e);
       status.classList.add('error');
       status.textContent = `Could not start: ${e.message ?? e}`;

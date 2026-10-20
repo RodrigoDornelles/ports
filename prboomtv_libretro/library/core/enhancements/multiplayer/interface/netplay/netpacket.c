@@ -63,7 +63,7 @@ static void RETRO_CALLCONV dopo_netpacket_disconnected(uint16_t client_id)
 }
 
 /* protocol_version: the core's version; RetroArch only warns when it
- * differs, so the session's HELLO checks it too (multiplayer/session.c) */
+ * differs, so the session's HELLO checks it too (enhancements/multiplayer/session.c) */
 static const struct retro_netpacket_callback dopo_netpacket_callback =
 {
    dopo_netpacket_start,

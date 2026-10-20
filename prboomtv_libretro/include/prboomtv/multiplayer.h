@@ -94,7 +94,7 @@ typedef struct
 } dopo_mp_slot_t;
 
 /* ------------------------------------------------------------------ */
-/* Transport: implemented by multiplayer/interface/<transport>/        */
+/* Transport (enhancements/multiplayer/interface/<transport>/)        */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -121,7 +121,7 @@ void dopo_mp_on_stop(void);
 void dopo_mp_on_poll(void);
 
 /* ------------------------------------------------------------------ */
-/* Session (multiplayer/session.c)                                     */
+/* Session (enhancements/multiplayer/session.c)                       */
 /* ------------------------------------------------------------------ */
 
 /** @brief Where the session is. */
@@ -199,7 +199,7 @@ void dopo_mp_tic_begin(int tic);
 void dopo_mp_session_tic(int tic);
 
 /* ------------------------------------------------------------------ */
-/* Actions inside a game tic (multiplayer/actions.c)                   */
+/* Actions inside a game tic (enhancements/multiplayer/actions.c)     */
 /* ------------------------------------------------------------------ */
 
 /** @brief Kills a player, god mode and invulnerability included. */
@@ -212,7 +212,7 @@ void dopo_mp_kill(int slot);
 void dopo_mp_teleport(int slot, int target);
 
 /* ------------------------------------------------------------------ */
-/* Lockstep (multiplayer/lockstep.c, in d_client.c)                    */
+/* Lockstep (enhancements/multiplayer/lockstep.c, in d_client.c)      */
 /* ------------------------------------------------------------------ */
 
 /** @brief Forgets every ticcmd: a new game starts at tic 0. */

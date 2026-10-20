@@ -30,6 +30,13 @@ include(dopo/cmake/dopo.cmake)
 # the web build's pages and everything they load, one folder per core
 set(PORTS_DIST "${CMAKE_BINARY_DIR}/dist")
 
+if (EMSCRIPTEN)
+    add_custom_command(OUTPUT "${PORTS_DIST}/index.html"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/www/index.html" "${PORTS_DIST}/index.html"
+        DEPENDS "${DOPO_DIR}/www/index.html")
+    add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")
+endif()
+
 if (PORTS_USE_SDL_LIBRETRO)
     include(cmake/sdl_libretro.cmake)
 endif()

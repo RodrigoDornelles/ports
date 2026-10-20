@@ -2,7 +2,7 @@
  * @brief Multiplayer session: the lobby (slots, names, setup), the
  * packets between machines and the start and end of a netgame.
  *
- * The transport (multiplayer/interface/) calls the dopo_mp_on_* events;
+ * The transport (enhancements/multiplayer/interface/) calls the dopo_mp_on_* events;
  * the game starts and ends in dopo_mp_frame(), at the top of TryRunTics,
  * never in the middle of a tic.
  */

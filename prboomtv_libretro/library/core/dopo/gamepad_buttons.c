@@ -1,15 +1,15 @@
 /**
  * @brief Gamepad buttons: the single upstream function that turns every
  * button change into a key event, shared by the Action Button
- * (patchs/action_button.c) and Side Walk (patchs/side_walk.c) patches.
+ * (patchs/tv/action_button.c) and Side Walk (patchs/tv/side_walk.c) patches.
  */
 
 /**
  * @brief Posts gamepad button changes as key events.
  *
  * In game, while dopo_action_button is on, DOPO_ACTION_BUTTON resolves to
- * use or fire whatever the layout binds it to (patchs/action_button.c),
- * and turn buttons may walk sideways (patchs/side_walk.c); in the menu
+ * use or fire whatever the layout binds it to (patchs/tv/action_button.c),
+ * and turn buttons may walk sideways (patchs/tv/side_walk.c); in the menu
  * every button keeps the layout's menu key.
  *
  * @patch libretro/libretro.c 3399-3426

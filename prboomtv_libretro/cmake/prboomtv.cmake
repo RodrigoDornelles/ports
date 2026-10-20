@@ -289,6 +289,42 @@ if (prboomtv_font_result)
     message(FATAL_ERROR "prboomtv: failed to convert the Odamex font\n${prboomtv_font_error}")
 endif()
 
+# the GPU renderer's shaders, embedded as C arrays named after their files
+# (dopo/scripts/xxd.cpp) into include/prboomtv/gpu/shaders.h of the build tree;
+# a shader that changes reconfigures, the header is only rewritten on change
+dopo_host_tool(dopo_xxd "${DOPO_DIR}/scripts/xxd.cpp")
+file(GLOB prboomtv_shaders CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/library/core/enhancements/gpu/shaders/*.glsl")
+list(SORT prboomtv_shaders)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_shaders})
+set(PRBOOMTV_INCLUDE_GENERATED "${CMAKE_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu" "${CMAKE_BINARY_DIR}/prboomtv/gpu")
+execute_process(
+    COMMAND "${dopo_xxd_TOOL}" ${prboomtv_shaders}
+    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/shaders.h"
+    RESULT_VARIABLE prboomtv_xxd_result
+    ERROR_VARIABLE prboomtv_xxd_error)
+if (prboomtv_xxd_result)
+    message(FATAL_ERROR "prboomtv: failed to embed the shaders\n${prboomtv_xxd_error}")
+endif()
+file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/shaders.h"
+    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/shaders.h" ONLY_IF_DIFFERENT)
+
+# the built-in dynamic lights (prboom-dynlight, GLDEFS text), the same way
+# into include/prboomtv/gpu/gldefs.h
+file(GLOB prboomtv_gldefs CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/library/core/enhancements/gpu/gldefs/*.txt")
+list(SORT prboomtv_gldefs)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${prboomtv_gldefs})
+execute_process(
+    COMMAND "${dopo_xxd_TOOL}" ${prboomtv_gldefs}
+    OUTPUT_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
+    RESULT_VARIABLE prboomtv_xxd_result
+    ERROR_VARIABLE prboomtv_xxd_error)
+if (prboomtv_xxd_result)
+    message(FATAL_ERROR "prboomtv: failed to embed the lights\n${prboomtv_xxd_error}")
+endif()
+file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
+    "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/gldefs.h" ONLY_IF_DIFFERENT)
+
 set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
 dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files})
 
@@ -326,7 +362,8 @@ if (EMSCRIPTEN)
 else()
     add_library(prboomtv_libretro SHARED "${prboomtv_files}")
 endif()
-target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include")
+target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include"
+    "${PRBOOMTV_INCLUDE_GENERATED}")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
     "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
@@ -364,72 +401,59 @@ if (EMSCRIPTEN)
     set_target_properties(prboomtv_libretro PROPERTIES OUTPUT_NAME "prboomtv_libretro_emscripten")
 else()
     target_compile_definitions(prboomtv_libretro PRIVATE HAVE_THREADS HAVE_MMAP)
-    target_link_libraries(prboomtv_libretro PRIVATE m pthread)
+    target_link_libraries(prboomtv_libretro PRIVATE m pthread ${CMAKE_DL_LIBS})
     set_target_properties(prboomtv_libretro PROPERTIES
         OUTPUT_NAME "prboomtv_libretro"
         LINK_FLAGS "-Wl,--version-script=${PRBOOM_DIR}/libretro/link.T -Wl,--no-undefined")
 endif()
 
 if (EMSCRIPTEN)
-    set(PRBOOMTV_WEB_GAMES
-        "doom1:Doom (Shareware)"
-        "freedoom1:Freedoom: Phase 1"
-        "freedoom2:Freedoom: Phase 2"
-        CACHE STRING "games of the web build, as id:title")
+    # the games come from a games.json published with their playlists and
+    # banners next to it; the pages fetch them from there when played, the
+    # build only reads the list, at configure time
+    set(PRBOOMTV_GAMES_URL
+        "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/games.json"
+        CACHE STRING "games.json of the web build; its url and banner fields are relative to it")
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
-    foreach(file index.html style.css)
+    foreach(file index.html style.css defaults.txt)
         add_custom_command(OUTPUT "${prboomtv_www}/${file}"
             COMMAND "${CMAKE_COMMAND}" -E copy "${PRBOOMTV_DIR}/www/${file}" "${prboomtv_www}/${file}"
             DEPENDS "${PRBOOMTV_DIR}/www/${file}")
         list(APPEND prboomtv_www_outputs "${prboomtv_www}/${file}")
     endforeach()
 
-    find_program(PRBOOMTV_ZSTD zstd REQUIRED)
-    set(prboomtv_games_archive "${PRBOOMTV_DIR}/wads.tar.zst")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${prboomtv_games_archive}")
-    execute_process(
-        COMMAND "${PRBOOMTV_ZSTD}" -dcq --long=30 "${prboomtv_games_archive}"
-        COMMAND tar -t
-        OUTPUT_VARIABLE prboomtv_game_wads
-        RESULT_VARIABLE prboomtv_games_result
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if (prboomtv_games_result)
-        message(FATAL_ERROR "prboomtv: cannot read ${prboomtv_games_archive}")
+    # offline, the copy of the last configure stands in
+    set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")
+    file(DOWNLOAD "${PRBOOMTV_GAMES_URL}" "${prboomtv_games_source}.part" STATUS prboomtv_games_status TLS_VERIFY ON)
+    list(GET prboomtv_games_status 0 prboomtv_games_code)
+    if (prboomtv_games_code EQUAL 0)
+        file(RENAME "${prboomtv_games_source}.part" "${prboomtv_games_source}")
+    else()
+        file(REMOVE "${prboomtv_games_source}.part")
+        list(GET prboomtv_games_status 1 prboomtv_games_error)
+        if (NOT EXISTS "${prboomtv_games_source}")
+            message(FATAL_ERROR "prboomtv: cannot fetch ${PRBOOMTV_GAMES_URL}: ${prboomtv_games_error}")
+        endif()
+        message(WARNING "prboomtv: cannot fetch ${PRBOOMTV_GAMES_URL} (${prboomtv_games_error}), using the last one fetched")
     endif()
-    string(REPLACE "\n" ";" prboomtv_game_wads "${prboomtv_game_wads}")
 
-    set(prboomtv_games_json "")
-    foreach(game ${PRBOOMTV_WEB_GAMES})
-        if (NOT game MATCHES "^([a-z0-9_]+):(.+)$")
-            message(FATAL_ERROR "prboomtv: '${game}' in PRBOOMTV_WEB_GAMES is not id:title")
-        endif()
-        set(GAME_ID "${CMAKE_MATCH_1}")
-        set(GAME_TITLE "${CMAKE_MATCH_2}")
-        if (NOT "${GAME_ID}.wad" IN_LIST prboomtv_game_wads)
-            message(FATAL_ERROR "prboomtv: ${GAME_ID}.wad is not in ${prboomtv_games_archive}")
-        endif()
-        configure_file("${PRBOOMTV_DIR}/www/game.html" "${prboomtv_www}/${GAME_ID}/index.html" @ONLY)
-        string(REPLACE "\"" "\\\"" title "${GAME_TITLE}")
-        if (prboomtv_games_json)
-            string(APPEND prboomtv_games_json ",\n")
-        endif()
-        string(APPEND prboomtv_games_json "  {\"id\": \"${GAME_ID}\", \"title\": \"${title}\"}")
-    endforeach()
-    file(CONFIGURE OUTPUT "${prboomtv_www}/games.json" CONTENT "[\n${prboomtv_games_json}\n]\n")
+    # a page per game and the index's list (scripts/games.nim)
+    include("${DOPO_DIR}/cmake/nim.cmake")
+    dopo_nim_tool(prboomtv_games "${PRBOOMTV_DIR}/scripts/games.nim")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/www/game.html")
+    execute_process(
+        COMMAND "${prboomtv_games_TOOL}"
+            --games "${prboomtv_games_source}"
+            --url "${PRBOOMTV_GAMES_URL}"
+            --template "${PRBOOMTV_DIR}/www/game.html"
+            --output "${prboomtv_www}"
+        RESULT_VARIABLE prboomtv_games_result
+        ERROR_VARIABLE prboomtv_games_error)
+    if (prboomtv_games_result)
+        message(FATAL_ERROR "prboomtv: failed to make the game pages\n${prboomtv_games_error}")
+    endif()
 
-    set(prboomtv_roms "${prboomtv_www}/roms")
-    set(prboomtv_games_tar "${CMAKE_BINARY_DIR}/prboomtv/games.tar")
-    list(TRANSFORM prboomtv_game_wads PREPEND "${prboomtv_roms}/" OUTPUT_VARIABLE prboomtv_rom_outputs)
-    add_custom_command(OUTPUT ${prboomtv_rom_outputs}
-        COMMAND "${PRBOOMTV_ZSTD}" -dqf --long=30 "${prboomtv_games_archive}" -o "${prboomtv_games_tar}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${prboomtv_roms}"
-        COMMAND "${CMAKE_COMMAND}" -E chdir "${prboomtv_roms}" "${CMAKE_COMMAND}" -E tar xf "${prboomtv_games_tar}" --touch
-        COMMAND "${CMAKE_COMMAND}" -E rm -f "${prboomtv_games_tar}"
-        DEPENDS "${prboomtv_games_archive}"
-        COMMENT "prboomtv: WADs into ${prboomtv_roms}"
-        VERBATIM)
-
-    add_custom_target(prboomtv_www ALL DEPENDS ${prboomtv_www_outputs} ${prboomtv_rom_outputs})
+    add_custom_target(prboomtv_www ALL DEPENDS ${prboomtv_www_outputs})
 endif()
