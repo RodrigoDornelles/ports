@@ -452,10 +452,16 @@ void *dopo_resource_read(const char *file, int64_t *len, char *where, size_t whe
    return NULL;
 }
 
-/* the folder of GZDoom's filter/ this game reads */
+/* the folder of GZDoom's filter/ this game reads, told by the lumps
+ * GZDoom's iwadinfo looks for; Harmony before Freedoom, as it plays on
+ * freedoom2.wad, and Chex Quest, which GZDoom gives no lights, apart from
+ * Doom so it does not take Doom's */
 const char *dopo_resource_game(void)
 {
    return hexen ? "hexen" : heretic ? "heretic"
+        : W_CheckNumForName("0HAWK01") >= 0 ? "harmony"
+        : W_CheckNumForName("HACX-R") >= 0 ? "hacx.hacx1"
+        : W_CheckNumForName("CYCLA1") >= 0 ? "chex.chex3"
         : W_CheckNumForName("FREEDOOM") >= 0 ? "doom.freedoom" : "doom.id";
 }
 
@@ -579,7 +585,7 @@ static void dl_load(void)
    dl_defs = NULL;
    dl_binds = NULL;
    dl_ndefs = dl_capdefs = dl_nbinds = dl_capbinds = 0;
-   if (!raven)
+   if (!strncmp(dopo_resource_game(), "doom.", 5))
       dl_parse((const char *)doom1, (int)doom1_size, "gldefs/doom1.txt");
    dl_parse_lights_pk3();
    for (k = 0; k < sizeof(lumps) / sizeof(*lumps); k++)
