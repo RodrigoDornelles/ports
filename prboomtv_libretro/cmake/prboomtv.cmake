@@ -268,7 +268,7 @@ if (EMSCRIPTEN)
 endif()
 
 # files in library/core/ either carry /** @patch */ hunks applied on top of upstream
-# files (see dopo/scripts/dopo_patchs.cpp), or mirror the upstream layout and
+# files (see dopo/scripts/patchs.nim), or mirror the upstream layout and
 # replace the original ones, or are new files compiled as they are
 dopo_split_patchs(prboomtv_patch_files prboomtv_override_files
     "${PRBOOMTV_DIR}/library/core" "${PRBOOMTV_DIR}/library/core/*.c")
