@@ -21,21 +21,25 @@
   </div>
 
   <script type="module">
-    import { play, hashParams } from '../retroarch/player.js';
+    import { play, hashParams, coreOptions, loadOptions } from '../retroarch/player.js';
 
-    /* the values the build fills in live in attributes, read back here */
     const title = document.querySelector('meta[property="og:title"]').content;
     const content = document.querySelector('meta[name="prboomtv:content"]').content;
     const loading = document.getElementById('loading');
     const status = document.getElementById('status');
 
-    /* the core options come from the hash (#prboom-render=gl&...), the
-     * index puts them there; the sound starts with the first key or
-     * click, browsers hold audio back until the page is interacted with */
+    const defaults = await loadOptions('defaults.txt').catch((e) => {
+      console.warn('[prboomtv]', e);
+      return {};
+    });
+
+    /* the sound starts with the first key or click: browsers hold audio
+     * back until the page is interacted with */
     play({
       canvas: document.getElementById('canvas'),
       core: 'prboomtv_libretro.js',
       content,
+      options: { ...defaults, ...coreOptions() },
       nick: hashParams().get('nick') || '',
       progress: (loaded, total) => {
         if (total) status.textContent = `Loading ${title}... ${Math.min(100, Math.round(loaded * 100 / total))}%`;

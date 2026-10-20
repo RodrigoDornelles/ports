@@ -255,6 +255,22 @@ export async function watchLobby(core, onChange) {
   };
 }
 
+/** Core options from a text file at url, one key=value a line ('#' starts
+ * a comment): { 'prboom-glow': '2' }. */
+export async function loadOptions(url) {
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error(`${url}: HTTP ${response.status}`);
+  const options = {};
+  for (const line of (await response.text()).split(/\r?\n/)) {
+    const text = line.trim();
+    const at = text.indexOf('=');
+    if (!text || text.startsWith('#') || at < 1) continue;
+    options[text.slice(0, at).trim()] = text.slice(at + 1).trim();
+  }
+  return options;
+}
+
 /** The page's hash as parameters: #nick=rodrigo */
 export function hashParams() {
   return new URLSearchParams(location.hash.slice(1));

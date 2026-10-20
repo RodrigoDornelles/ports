@@ -417,7 +417,7 @@ if (EMSCRIPTEN)
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
-    foreach(file index.html style.css)
+    foreach(file index.html style.css defaults.txt)
         add_custom_command(OUTPUT "${prboomtv_www}/${file}"
             COMMAND "${CMAKE_COMMAND}" -E copy "${PRBOOMTV_DIR}/www/${file}" "${prboomtv_www}/${file}"
             DEPENDS "${PRBOOMTV_DIR}/www/${file}")
