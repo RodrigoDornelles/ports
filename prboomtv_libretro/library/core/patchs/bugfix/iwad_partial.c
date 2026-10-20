@@ -5,7 +5,7 @@
  * none was found and the map loaded from lump -1 onwards (HACX's
  * DEHACKED read as sectors, then a crash). Only an IWAD left indetermined
  * with nothing but MAPxx maps is touched; Strife's, told by its ENDSTRF
- * lump, is not a Doom 2 and stays as it was.
+ * lump, is not a Doom 2 and is refused.
  */
 
 /** @patch src/d_main.c 866 */
@@ -20,6 +20,21 @@
         else if (!strncmp(fileinfo[length].name, "ENDSTRF", 7) &&
                  fileinfo[length].name[7] == 0)
           ++strife;
+/* @endpatch */
+
+/**
+ * @brief Strife is refused: it is another game on a reworked engine
+ * (dialogues, inventory, its own things and line specials), not a set of
+ * maps this one plays. Let through, it was looked up as ExMy like HACX
+ * and crashed on its title demo; refused, the frontend reports the
+ * content failed to load.
+ *
+ * @patch src/d_main.c 953
+ */
+    if (strife)
+      return I_Error("CheckIWAD: %s is Strife, which PrBoomTV does not run",
+                     iwadname);
+
 /* @endpatch */
 
 /**
