@@ -48,13 +48,15 @@
 
     .ports {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      /* 320 wide cards (+2 of border): the banners at their own pixels */
+      grid-template-columns: repeat(auto-fill, minmax(0, 322px));
       gap: 16px;
       margin: 0;
       padding: 0;
       list-style: none;
     }
 
+    /* the whole card is the link */
     .port {
       display: flex;
       flex-direction: column;
@@ -63,52 +65,36 @@
       border-radius: 10px;
       overflow: hidden;
       background: var(--panel);
+      color: inherit;
+      text-decoration: none;
+      transition: border-color 0.15s, transform 0.15s;
     }
 
-    /* the title screens are 320x200 drawn for 4:3 monitors */
+    .port:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .port:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+
     .port img {
       display: block;
       width: 100%;
-      aspect-ratio: 4 / 3;
+      aspect-ratio: 320 / 200;
       image-rendering: pixelated;
       background: #000;
-    }
-
-    /* banners drawn at higher resolution than the title screens */
-    .port img.smooth {
-      object-fit: cover;
-      image-rendering: auto;
     }
 
     .body {
       display: flex;
       flex: 1;
       flex-direction: column;
-      gap: 10px;
-      padding: 16px;
+      gap: 6px;
+      padding: 12px 14px 14px;
     }
 
-    .port h2 { margin: 0; font-size: 22px; line-height: 1.2; }
-    .port p { margin: 0; color: var(--muted); }
+    .port h2 { margin: 0; font-size: 18px; line-height: 1.2; }
+    .port p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
 
-    .play {
-      align-self: flex-start;
-      margin-top: auto;
-      padding: 10px 28px;
-      border-radius: 6px;
-      background: var(--accent);
-      color: var(--accent-text);
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      text-decoration: none;
-    }
-
-    .play:hover { filter: brightness(1.1); }
-    .play:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
-
-    @media (max-width: 520px) {
-      .play { align-self: stretch; text-align: center; }
+    @media (prefers-reduced-motion: reduce) {
+      .port { transition: none; }
+      .port:hover { transform: none; }
     }
   </style>
 </head>
@@ -119,24 +105,22 @@
 
     <ul class="ports">
       <li>
-        <article class="port">
-          <img src="https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png" alt="Doom title screen" loading="lazy">
+        <a class="port" href="prboomtv/">
+          <img src="https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png" alt="" loading="lazy">
           <div class="body">
             <h2>PrBoomTV</h2>
             <p>Doom, Heretic, Freedoom and more on PrBoom, with OpenGL lights, widescreen and online multiplayer.</p>
-            <a class="play" href="prboomtv/">Play</a>
           </div>
-        </article>
+        </a>
       </li>
       <li>
-        <article class="port">
-          <img class="smooth" src="balatro/banner.jpeg" alt="Balatro logo with playing cards" loading="lazy">
+        <a class="port" href="balatro/">
+          <img src="balatro/banner.png" alt="" loading="lazy">
           <div class="body">
             <h2>Balatro</h2>
             <p>Patch your own Balatro for TV boxes and handhelds: lighter textures, fonts and shaders, right in the browser.</p>
-            <a class="play" href="balatro/">Patch</a>
           </div>
-        </article>
+        </a>
       </li>
     </ul>
   </main>

@@ -31,7 +31,7 @@ dopo_nim_js(balatro_patchs "${DOPO_DIR}/scripts/patchs.nim" "${balatro_www}/patc
 set(balatro_copies
     "${DOPO_DIR}/www/balatro.html" index.html
     "${DOPO_DIR}/www/balatro.js" balatro.js
-    "${DOPO_DIR}/assets/balatro.jpeg" banner.jpeg)
+    "${DOPO_DIR}/assets/balatro.png" banner.png)
 set(balatro_list "")
 foreach(patch ${BALATRO_PATCHS})
     set(files "")
