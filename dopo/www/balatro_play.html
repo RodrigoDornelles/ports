@@ -26,6 +26,19 @@
       height: 100vh !important;
       height: 100dvh !important;
     }
+    /* Balatro only plays lying down: a standing page (a phone with its
+     * rotation locked) gets the game turned a quarter, to be held sideways */
+    @media (orientation: portrait) {
+      #canvas {
+        top: 0;
+        left: 100vw;
+        width: 100vh !important;
+        width: 100dvh !important;
+        height: 100vw !important;
+        transform: rotate(90deg);
+        transform-origin: top left;
+      }
+    }
     #loading {
       position: fixed;
       inset: 0;
@@ -83,6 +96,44 @@
         }))
         .catch((e) => console.warn('[balatro] cache:', e));
     }
+
+    /* Emscripten sizes the game and places taps by the canvas's box on the
+     * page and the events' clientX/clientY: turned, the canvas answers with
+     * its own box, lying down, and every mouse and touch event, before it
+     * reaches the game, has its point turned into that box */
+    const canvas = document.getElementById('canvas');
+    const portrait = matchMedia('(orientation: portrait)');
+    const pageRect = () => Element.prototype.getBoundingClientRect.call(canvas);
+    canvas.getBoundingClientRect = () => {
+      if (!portrait.matches) return pageRect();
+      const width = canvas.offsetWidth, height = canvas.offsetHeight;
+      return { left: 0, top: 0, x: 0, y: 0, right: width, bottom: height, width, height };
+    };
+    const original = (proto, key) => Object.getOwnPropertyDescriptor(proto, key).get;
+    const turn = (point, proto) => {
+      const rect = pageRect();
+      const x = original(proto, 'clientX').call(point);
+      const y = original(proto, 'clientY').call(point);
+      Object.defineProperty(point, 'clientX', { value: y - rect.top, configurable: true });
+      Object.defineProperty(point, 'clientY', { value: rect.right - x, configurable: true });
+    };
+    const turnMouse = (e) => { if (portrait.matches) turn(e, MouseEvent.prototype); };
+    const turnTouch = (e) => {
+      if (!portrait.matches) return;
+      for (const list of [e.touches, e.changedTouches, e.targetTouches]) {
+        for (const touch of list) turn(touch, Touch.prototype);
+      }
+    };
+    for (const type of ['mousedown', 'mouseup', 'mousemove', 'wheel']) {
+      window.addEventListener(type, turnMouse, true);
+    }
+    if (window.TouchEvent) {
+      for (const type of ['touchstart', 'touchend', 'touchmove', 'touchcancel']) {
+        window.addEventListener(type, turnTouch, true);
+      }
+    }
+    /* turning the page turns the canvas: the game is told of its new size */
+    portrait.addEventListener('change', () => window.dispatchEvent(new Event('resize')));
 
     const status = document.getElementById('status');
     const missing = () => {
