@@ -55,9 +55,11 @@ export async function loadWebPatchs(base) {
 }
 
 /* the game the play page runs: in love.js's own store, where its player
- * looks first, under the name the play page asks it for */
+ * looks first, under the name the play page asks it for; the player's copy
+ * next to it, to build the game again */
 const STORE = 'EM_PRELOAD_CACHE';
 const PACKAGE = 'Balatro.love';
+const ORIGINAL = 'dopo:original';
 
 function packages(mode, use) {
     return new Promise((resolve, reject) => {
@@ -73,15 +75,22 @@ function packages(mode, use) {
     });
 }
 
-/** whether a game is on this device for the play page */
-export async function hasPlayable() {
-    return Boolean(await packages('readonly', (store) => store.getKey(PACKAGE)).catch(() => undefined));
+/** the copy of the game kept on this device, as openGame gives it, or null */
+export async function storedGame() {
+    const bytes = await packages('readonly', (store) => store.get(ORIGINAL)).catch(() => undefined);
+    return bytes ? openGame(bytes) : null;
 }
 
-/** leaves game, with what it needs to run in a browser, for the play page */
+/**
+ * Leaves game for the play page, built again with the patchs it needs in a
+ * browser; the store is emptied first, so love.js fetches its own files
+ * again too (the game's saves are elsewhere, kept)
+ */
 export async function storePlayable(game, webPatchs, progress) {
     const blob = await buildLove(game, webPatchs, progress);
     const data = new Uint8Array(await blob.arrayBuffer());
+    await packages('readwrite', (store) => store.clear());
+    await packages('readwrite', (store) => store.put(game.bytes.slice(), ORIGINAL));
     await packages('readwrite', (store) => store.put(data, PACKAGE));
 }
 

@@ -57,7 +57,7 @@
   <script src="patchs.js"></script>
   <script type="module">
     import { GAME_VERSION, loadPatchs, loadWebPatchs, loadSelection, findConflicts, openGame, buildLove,
-             hasPlayable, storePlayable } from './balatro.js';
+             storedGame, storePlayable } from './balatro.js';
 
     const $ = (id) => document.getElementById(id);
     const status = (text, error = false) => {
@@ -72,7 +72,9 @@
     let game = null;
     let busy = false;
     let tab = 'play';
-    let playable = await hasPlayable();
+    /* the copy left by an earlier Play, rebuilt on every Play */
+    let stored = await storedGame().catch(() => null);
+    let playable = Boolean(stored);
 
     const box = (name) => $('groups').querySelector(`input[value="${name}"]`);
     const titleOf = (name) => patchs.find((patch) => patch.name === name).title;
@@ -227,18 +229,16 @@
 
     $('go').addEventListener('click', async () => {
       if (tab === 'play') {
-        if (game) {
-          busy = true;
+        busy = true;
+        refresh();
+        try {
+          await storePlayable(game ?? stored, await loadWebPatchs(location.href),
+            (percent) => status(`Preparing… ${Math.floor(percent)}%`));
+        } catch (error) {
+          busy = false;
+          status(error.message, true);
           refresh();
-          try {
-            await storePlayable(game, await loadWebPatchs(location.href),
-              (percent) => status(`Preparing… ${Math.floor(percent)}%`));
-          } catch (error) {
-            busy = false;
-            status(error.message, true);
-            refresh();
-            return;
-          }
+          return;
         }
         location.href = 'play/';
         return;
