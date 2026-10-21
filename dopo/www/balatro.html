@@ -2,22 +2,26 @@
 <html lang="en">
 <head>
 {{> head}}
+  <!-- the app Install puts with the others is the play page's -->
+  <link rel="manifest" href="play/manifest.webmanifest">
 </head>
 <body>
   <main>
 {{> header}}
     <p class="lead">
       <span data-tab="play">Play your own Balatro in the browser, as it is. Your copy never leaves your computer.</span>
+      <span data-tab="install" hidden>Install Balatro as an app, on your phone or computer. It asks for your own copy the first time it opens, and keeps it on your device.</span>
       <span data-tab="download" hidden>Bring your own Balatro <span class="version"></span>. It is patched here, in your browser, and never leaves your computer.</span>
     </p>
 
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tab-play" aria-selected="true">Play</button>
       <button type="button" role="tab" id="tab-download" aria-selected="false">Download</button>
+      <button type="button" role="tab" id="tab-install" aria-selected="false" hidden>Install</button>
     </div>
 
     <div class="bar">
-      <div class="field grow">
+      <div class="field grow" data-tab="play download">
         <span>Your copy</span>
         <label class="file" id="drop">
           <input type="file" id="file" accept=".exe,.love">
@@ -38,12 +42,16 @@
     <p class="status" id="status" role="status"></p>
 
     <section data-tab="play">
+      <p class="note">Play runs the original game, without patches, in this browser.</p>
+    </section>
+
+    <section data-tab="install" hidden>
       <h2>Install it as an app</h2>
-      <p class="note">Play runs the original game, without patches. Installed, it opens from your apps and keeps your copy and your saves.</p>
+      <p class="note">The original game, without patches. Installed, it opens from your apps and keeps your copy and your saves.</p>
       <ol class="howto">
-        <li><div class="shot">screenshot</div><b>Press Play</b><span>The game opens on its own page.</span></li>
-        <li><div class="shot">screenshot</div><b>Install</b><span>In the browser's menu, choose Install app, or Add to Home screen on a phone.</span></li>
+        <li><div class="shot">screenshot</div><b>Press Install</b><span>And confirm in the browser's window.</span></li>
         <li><div class="shot">screenshot</div><b>Open Balatro</b><span>It is now with your other apps, and works offline.</span></li>
+        <li><div class="shot">screenshot</div><b>Choose your copy</b><span>The first time, it asks for your Balatro.exe or Balatro.love, from Steam's folder or your computer.</span></li>
       </ol>
     </section>
 
@@ -72,31 +80,57 @@
     let game = null;
     let busy = false;
     let tab = 'play';
+    /* the browser's own window to install the play page's app: Install only
+     * shows where there is one (not in Safari nor Firefox), and the app
+     * asks for the copy itself */
+    let offer = null;
+    let started = false;
+    addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      offer = event;
+      $('tab-install').hidden = false;
+      if (started) refresh();
+    });
+    addEventListener('appinstalled', () => {
+      offer = null;
+      if (tab === 'install') status('Balatro is installed: open it from your apps.');
+      if (started) refresh();
+    });
+    navigator.serviceWorker?.register('play/sw.js').catch((e) => console.warn('[balatro] cache:', e));
     /* the copy left by an earlier Play, rebuilt on every Play */
     let stored = await storedGame().catch(() => null);
     let playable = Boolean(stored);
 
     const box = (name) => $('groups').querySelector(`input[value="${name}"]`);
     const titleOf = (name) => patchs.find((patch) => patch.name === name).title;
+    /* Play and Install take the copy chosen, or the one already on this device */
+    const LABELS = { play: 'Play', download: 'Download', install: 'Install' };
     /* Play takes the copy chosen, or the one already on this device */
     const refresh = () => {
       const ready = game && game.version === GAME_VERSION;
-      $('go').disabled = busy || !(ready || (tab === 'play' && playable && !game));
-      $('go').textContent = tab === 'play' ? 'Play' : 'Download';
+      $('go').disabled = busy || (tab === 'install' ? !offer : !(ready || (tab === 'play' && playable && !game)));
+      $('go').textContent = LABELS[tab];
     };
 
-    /* the tabs: Play, the game as it is, and Download, patched */
+    /* the tabs: Play, the game as it is in this browser; Download, patched;
+     * and Install, the play page as an app */
     function showTab(name) {
       tab = name;
       for (const button of document.querySelectorAll('[role=tab]'))
         button.setAttribute('aria-selected', String(button.id === `tab-${name}`));
-      for (const el of document.querySelectorAll('[data-tab]')) el.hidden = el.dataset.tab !== name;
+      for (const el of document.querySelectorAll('[data-tab]')) el.hidden = !el.dataset.tab.split(' ').includes(name);
+      document.querySelector('.bar').classList.toggle('solo', name === 'install');
       status(name === 'play' && playable && !game ? 'Balatro is on this device: Play opens it.' : '');
       refresh();
     }
-    $('tab-play').addEventListener('click', () => { showTab('play'); history.replaceState(null, '', '#'); });
-    $('tab-download').addEventListener('click', () => { showTab('download'); history.replaceState(null, '', '#download'); });
-    showTab(location.hash === '#download' ? 'download' : 'play');
+    for (const name of Object.keys(LABELS)) {
+      $(`tab-${name}`).addEventListener('click', () => {
+        showTab(name);
+        history.replaceState(null, '', name === 'play' ? '#' : `#${name}`);
+      });
+    }
+    showTab(LABELS[location.hash.slice(1)] ? location.hash.slice(1) : 'play');
+    started = true;
 
     /* the counts of each group and of all: full is every patch that goes
      * together, the first of a conflicting pair */
@@ -228,6 +262,14 @@
     });
 
     $('go').addEventListener('click', async () => {
+      if (tab === 'install') {
+        const event = offer;
+        offer = null;
+        refresh();
+        event.prompt();
+        await event.userChoice;
+        return;
+      }
       if (tab === 'play') {
         busy = true;
         refresh();

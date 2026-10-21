@@ -11,10 +11,10 @@
   "theme_color": "#000000",
   "categories": ["games"],
   "icons": [
-    {"src": "../../android-chrome-192x192.png", "sizes": "192x192", "type": "image/png"},
-    {"src": "../../android-chrome-512x512.png", "sizes": "512x512", "type": "image/png"}
+    {"src": "../icon-192x192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "../icon-512x512.png", "sizes": "512x512", "type": "image/png"}
   ],
   "screenshots": [
-    {"src": "../banner.png", "sizes": "320x200", "type": "image/png", "form_factor": "wide", "label": "Balatro"}
+    {"src": "../screenshot.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Balatro"}
   ]
 }
