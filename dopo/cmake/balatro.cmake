@@ -52,12 +52,14 @@ dopo_www_page("${balatro_www}/index.html" "${DOPO_DIR}/www/balatro.html"
     "description=Your own Balatro in the browser, or patched lighter for TV boxes and handhelds."
     "root=../" "back=../" "source=/tree/main/dopo/games/balatro"
     "title_before=Bal" "title_accent=a" "title_after=tro"
-    "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/balatro.png")
+    "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/balatro/320x200.png")
 list(APPEND balatro_outputs "${balatro_www}/index.html")
 
 set(balatro_copies
     "${DOPO_DIR}/www/balatro.js" balatro.js
-    "${DOPO_DIR}/assets/balatro.png" banner.png
+    "${DOPO_DIR}/assets/balatro/320x200.png" banner.png
+    "${DOPO_DIR}/assets/balatro/192x192.png" icon-192x192.png
+    "${DOPO_DIR}/assets/balatro/512x512.png" icon-512x512.png
     "${DOPO_DIR}/defaults/balatro_zaper.txt" defaults_zaper.txt)
 # the JSON list of the patchs in dir (relative to games/balatro), and
 # their files to the copies
