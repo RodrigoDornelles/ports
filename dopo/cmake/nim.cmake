@@ -73,3 +73,14 @@ function(dopo_nim_tool name source)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
     set(${name}_TOOL "${tool}" PARENT_SCOPE)
 endfunction()
+
+# compiles the Nim script source with the JS backend into output, at build
+# time, for the web pages
+function(dopo_nim_js name source output)
+    add_custom_command(OUTPUT "${output}"
+        COMMAND "${NIM_EXECUTABLE}" js -d:release --hints:off --warnings:off
+            "--nimcache:${CMAKE_BINARY_DIR}/dopo/nimcache/${name}" "--out:${output}" "${source}"
+        DEPENDS "${source}"
+        COMMENT "nim: ${name}"
+        VERBATIM)
+endfunction()

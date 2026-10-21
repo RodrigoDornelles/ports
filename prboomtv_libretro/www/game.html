@@ -3,24 +3,43 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>@GAME_TITLE@ - PrBoomTV</title>
-  <meta name="description" content="Play @GAME_TITLE@ in the browser with PrBoomTV, alone or with friends.">
+  <title>{{title}} - PrBoomTV</title>
+  <meta name="description" content="Play {{title}} in the browser with PrBoomTV, alone or with friends.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="@GAME_TITLE@">
-  <meta property="og:description" content="Play @GAME_TITLE@ in the browser with PrBoomTV, alone or with friends.">
-  <meta property="og:image" content="@GAME_BANNER@">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="Play {{title}} in the browser with PrBoomTV, alone or with friends.">
+  <meta property="og:image" content="{{banner}}">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="prboomtv:content" content="@GAME_CONTENT@">
+  <meta name="prboomtv:content" content="{{content}}">
+  <link rel="manifest" href="{{id}}.webmanifest">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="{{title}}">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="play">
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
   <div id="loading">
-    <img class="banner" src="@GAME_BANNER@" alt="">
-    <p id="status">Loading @GAME_TITLE@...</p>
+    <img class="banner" src="{{banner}}" alt="">
+    <p id="status">Loading {{title}}...</p>
   </div>
 
   <script type="module">
+    /* installed or not, the game is kept on this device for the next start;
+     * the first time, the worker also takes what loaded before it */
+    navigator.serviceWorker?.register('sw.js')
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => registration.active.postMessage({
+        cache: [location.href.split('#')[0],
+                ...performance.getEntriesByType('resource').map((entry) => entry.name)],
+      }))
+      .catch((e) => console.warn('[prboomtv] cache:', e));
+
     import { play, hashParams, coreOptions, loadOptions } from '../retroarch/player.js';
 
     const title = document.querySelector('meta[property="og:title"]').content;

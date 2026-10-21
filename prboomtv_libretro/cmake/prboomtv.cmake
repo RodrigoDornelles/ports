@@ -257,7 +257,7 @@ set(prboomtv_upstream_files
 )
 
 if (EMSCRIPTEN)
-    # linked into RetroArch (retroarch/cmake/retroarch.cmake), which brings
+    # linked into RetroArch (dopo/cmake/retroarch.cmake), which brings
     # its own libretro-common, as upstream's STATIC_LINKING does; and no
     # threads, so the page needs no SharedArrayBuffer
     list(REMOVE_ITEM prboomtv_upstream_files
@@ -268,7 +268,7 @@ if (EMSCRIPTEN)
 endif()
 
 # files in library/core/ either carry /** @patch */ hunks applied on top of upstream
-# files (see dopo/scripts/dopo_patchs.cpp), or mirror the upstream layout and
+# files (see dopo/scripts/patchs.nim), or mirror the upstream layout and
 # replace the original ones, or are new files compiled as they are
 dopo_split_patchs(prboomtv_patch_files prboomtv_override_files
     "${PRBOOMTV_DIR}/library/core" "${PRBOOMTV_DIR}/library/core/*.c")
@@ -417,12 +417,30 @@ if (EMSCRIPTEN)
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
-    foreach(file index.html style.css defaults.txt)
+    # style.css is the game page's; the options' defaults come from
+    # dopo/defaults, the browser's under the name the pages fetch
+    foreach(copy "www/style.css=style.css" "../dopo/www/sw.js=sw.js"
+                 "../dopo/defaults/prboomtv_web.txt=defaults.txt"
+                 "../dopo/defaults/prboomtv_zaper.txt=defaults_zaper.txt")
+        string(REPLACE "=" ";" copy "${copy}")
+        list(GET copy 0 source)
+        list(GET copy 1 file)
+        get_filename_component(source "${PRBOOMTV_DIR}/${source}" ABSOLUTE)
         add_custom_command(OUTPUT "${prboomtv_www}/${file}"
-            COMMAND "${CMAKE_COMMAND}" -E copy "${PRBOOMTV_DIR}/www/${file}" "${prboomtv_www}/${file}"
-            DEPENDS "${PRBOOMTV_DIR}/www/${file}")
+            COMMAND "${CMAKE_COMMAND}" -E copy "${source}" "${prboomtv_www}/${file}"
+            DEPENDS "${source}")
         list(APPEND prboomtv_www_outputs "${prboomtv_www}/${file}")
     endforeach()
+
+    include("${DOPO_DIR}/cmake/www.cmake")
+    dopo_www_page("${prboomtv_www}/index.html" "${PRBOOMTV_DIR}/www/index.html"
+        --partials "${PRBOOMTV_DIR}/www/partials"
+        "title=PrBoomTV"
+        "description=Doom and friends in the browser, alone or with friends."
+        "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
+        "title_before=PrBoom" "title_accent=TV" "online=1"
+        "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
+    list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
 
     # offline, the copy of the last configure stands in
     set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")
@@ -441,13 +459,15 @@ if (EMSCRIPTEN)
 
     # a page per game and the index's list (scripts/games.nim)
     include("${DOPO_DIR}/cmake/nim.cmake")
-    dopo_nim_tool(prboomtv_games "${PRBOOMTV_DIR}/scripts/games.nim")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/www/game.html")
+    dopo_nim_tool(prboomtv_games "${PRBOOMTV_DIR}/scripts/games.nim" "--path:${NIM_MUSTACHE_DIR}/src")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PRBOOMTV_DIR}/www/game.html" "${PRBOOMTV_DIR}/www/game.webmanifest")
     execute_process(
         COMMAND "${prboomtv_games_TOOL}"
             --games "${prboomtv_games_source}"
             --url "${PRBOOMTV_GAMES_URL}"
             --template "${PRBOOMTV_DIR}/www/game.html"
+            --manifest "${PRBOOMTV_DIR}/www/game.webmanifest"
             --output "${prboomtv_www}"
         RESULT_VARIABLE prboomtv_games_result
         ERROR_VARIABLE prboomtv_games_error)

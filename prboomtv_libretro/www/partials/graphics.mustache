@@ -1,0 +1,40 @@
+          <label class="field">
+            <span>Render</span>
+            <select class="render" name="prboom-render">
+              <option value="gl">OpenGL</option>
+              <option value="software">Software</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Color</span>
+            <select name="prboom-color_format">
+              <option value="24bits (truecolor)">24-bit</option>
+              <option value="16bits">16-bit</option>
+            </select>
+          </label>
+          <label class="field gl-only">
+            <span>Dynamic lights</span>
+            <select name="prboom-dynlight">
+              <option value="0">Off</option>
+              <option value="1">Moving</option>
+              <option value="2">All</option>
+              <option value="3">All + shadows</option>
+            </select>
+          </label>
+          <label class="field gl-only">
+            <span>Fire glow</span>
+            <select name="prboom-glow">
+              <option value="0">Off</option>
+              <option value="1">Additive</option>
+              <option value="2">Additive + corona</option>
+            </select>
+          </label>
+          <label class="field gl-only">
+            <span>Sprite smoothing</span>
+            <select name="prboom-scale">
+              <option value="0">Off</option>
+              <option value="1">Contour</option>
+              <option value="2">Full</option>
+              <option value="3">Full + 4× contour</option>
+            </select>
+          </label>

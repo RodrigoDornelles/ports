@@ -24,6 +24,7 @@ set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 option(PORTS_USE_SDL_LIBRETRO "build sdl_libretro core (libretro backend + sdl2/jack frontends)" ON)
 option(PORTS_USE_PRBOOMTV_LIBRETRO "build prboomtv_libretro core (prboom patched for tv)" ON)
 option(PORTS_USE_RETROARCH "build RetroArch's web player with the cores (wasm only)" ${PORTS_WASM})
+option(DOPO_USE_BALATRO_WEB_PATCH "build the Balatro patcher page" OFF)
 
 include(dopo/cmake/dopo.cmake)
 
@@ -31,14 +32,26 @@ include(dopo/cmake/dopo.cmake)
 set(PORTS_DIST "${CMAKE_BINARY_DIR}/dist")
 
 if (EMSCRIPTEN)
-    add_custom_command(OUTPUT "${PORTS_DIST}/index.html"
-        COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/www/index.html" "${PORTS_DIST}/index.html"
-        DEPENDS "${DOPO_DIR}/www/index.html")
+    include(dopo/cmake/www.cmake)
+    set(dopo_home_balatro "")
+    if (DOPO_USE_BALATRO_WEB_PATCH)
+        set(dopo_home_balatro "balatro=1")
+    endif()
+    dopo_www_page("${PORTS_DIST}/index.html" "${DOPO_DIR}/www/index.html"
+        "title=Dornelles Ports"
+        "description=Classic games ported to the browser and to TV boxes, alone or with friends."
+        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro}
+        "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/android-chrome-512x512.png"
+        "card=summary")
     add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")
 endif()
 
+if (DOPO_USE_BALATRO_WEB_PATCH)
+    include(dopo/cmake/balatro.cmake)
+endif()
+
 if (PORTS_USE_SDL_LIBRETRO)
-    include(cmake/sdl_libretro.cmake)
+    include(dopo_libretro/cmake/dopo_libretro.cmake)
 endif()
 
 if (PORTS_USE_PRBOOMTV_LIBRETRO)
@@ -49,5 +62,5 @@ if (PORTS_USE_RETROARCH)
     if (NOT EMSCRIPTEN)
         message(FATAL_ERROR "PORTS_USE_RETROARCH builds the web player: use the wasm preset")
     endif()
-    include(retroarch/cmake/retroarch.cmake)
+    include(dopo/cmake/retroarch.cmake)
 endif()

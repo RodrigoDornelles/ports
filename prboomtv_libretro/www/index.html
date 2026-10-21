@@ -1,35 +1,28 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PrBoomTV</title>
-  <meta name="description" content="Doom and friends in the browser, alone or with friends.">
-  <link rel="stylesheet" href="style.css">
+{{> head}}
 </head>
 <body>
   <main>
-    <header class="top">
-      <h1>PrBoom<span>TV</span></h1>
-      <p id="online" class="online" aria-live="polite"><span class="dot"></span><span id="online-text">Looking for rooms...</span></p>
-    </header>
+{{> header}}
     <p class="lead">Doom in the browser. Multiplayer is browser against browser: open Multiplayer in the game's menu to host a room or join one.</p>
 
-    <form id="launch">
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-play" aria-controls="launch" aria-selected="true">Play</button>
+      <button type="button" role="tab" id="tab-download" aria-controls="pack" aria-selected="false">Download</button>
+    </div>
+
+    <form id="launch" role="tabpanel" aria-labelledby="tab-play">
       <div class="bar">
-        <label class="field nick">
+        <label class="field grow">
           <span>Nickname</span>
           <input id="nick" name="nick" type="text" maxlength="15" autocomplete="nickname" spellcheck="false" placeholder="Player">
         </label>
         <label class="field">
           <span>Resolution</span>
           <select name="prboom-resolution">
-            <option value="640x360">640×360</option>
-            <option value="960x540">960×540</option>
-            <option value="1280x720">1280×720 (HD)</option>
-            <option value="1600x900">1600×900</option>
-            <option value="1920x1080">1920×1080 (Full HD)</option>
-            <option value="2560x1440">2560×1440 (Quad HD)</option>
+{{> resolutions}}
           </select>
         </label>
         <fieldset class="field segmented">
@@ -42,52 +35,12 @@
           <label><input type="radio" name="prboom-frameskip" value="0"><span>60 fps</span></label>
           <label><input type="radio" name="prboom-frameskip" value="1"><span>30 fps</span></label>
         </fieldset>
-        <button type="submit" class="play-button">Play</button>
+        <button type="submit" class="go">Play</button>
       </div>
-
       <details class="graphics">
         <summary>Graphics</summary>
         <div class="options">
-          <label class="field">
-            <span>Render</span>
-            <select id="render" name="prboom-render">
-              <option value="gl">OpenGL</option>
-              <option value="software">Software</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Color</span>
-            <select name="prboom-color_format">
-              <option value="24bits (truecolor)">24-bit</option>
-              <option value="16bits">16-bit</option>
-            </select>
-          </label>
-          <label class="field gl-only">
-            <span>Dynamic lights</span>
-            <select name="prboom-dynlight">
-              <option value="0">Off</option>
-              <option value="1">Moving</option>
-              <option value="2">All</option>
-              <option value="3">All + shadows</option>
-            </select>
-          </label>
-          <label class="field gl-only">
-            <span>Fire glow</span>
-            <select name="prboom-glow">
-              <option value="0">Off</option>
-              <option value="1">Additive</option>
-              <option value="2">Additive + corona</option>
-            </select>
-          </label>
-          <label class="field gl-only">
-            <span>Sprite smoothing</span>
-            <select name="prboom-scale">
-              <option value="0">Off</option>
-              <option value="1">Contour</option>
-              <option value="2">Full</option>
-              <option value="3">Full + 4× contour</option>
-            </select>
-          </label>
+{{> graphics}}
         </div>
         <p class="hint">4:3 shows the classic picture with borders on the sides. Lights, glow and smoothing need OpenGL.</p>
       </details>
@@ -96,67 +49,143 @@
         <legend class="sr-only">Game</legend>
       </fieldset>
     </form>
+
+    <form id="pack" role="tabpanel" aria-labelledby="tab-download" hidden>
+      <div class="bar">
+        <label class="field grow">
+          <span>System</span>
+          <select id="system" name="system">
+            <optgroup label="Only the games">
+              <option value="wads">WADs for R36S and other PrBoom (.zip)</option>
+            </optgroup>
+            <optgroup label="PrBoomTV and the games">
+              <option value="webos">webOS TV (.ipk)</option>
+              <option value="zaper">Zaper (.ipks)</option>
+              <option value="x86_64">RetroArch core, x86_64 (.zip)</option>
+              <option value="armhf">RetroArch core, ARM (.zip)</option>
+              <option value="aarch64">RetroArch core, ARM64 (.zip)</option>
+            </optgroup>
+          </select>
+        </label>
+        <label class="field" id="extras" hidden>
+          <span>Extras</span>
+          <select name="extras">
+            <option value="lights">Dynamic lights</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <button type="submit" class="go">Download</button>
+      </div>
+      <p class="status" id="pack-status" role="status"></p>
+
+      <section id="tv" hidden>
+        <h2>Graphics</h2>
+        <div class="panel options">
+          <label class="field">
+            <span>Resolution</span>
+            <select name="prboom-resolution">
+{{> resolutions}}
+            </select>
+          </label>
+          <label class="field">
+            <span>Aspect</span>
+            <select name="prboom-widescreen">
+              <option value="enabled">16:9</option>
+              <option value="disabled">4:3</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Frame rate</span>
+            <select name="prboom-frameskip">
+              <option value="0">60 fps</option>
+              <option value="1">30 fps</option>
+            </select>
+          </label>
+{{> graphics}}
+        </div>
+      </section>
+
+      <h2>Games</h2>
+      <p class="note" id="pack-games-note"></p>
+      <fieldset class="games" id="pack-games">
+        <legend class="sr-only">Games in the package</legend>
+      </fieldset>
+    </form>
   </main>
 
   <script type="module">
     import { watchLobby, loadOptions } from '../retroarch/player.js';
 
     const form = document.getElementById('launch');
+    const pack = document.getElementById('pack');
     const list = document.getElementById('games');
+    const packList = document.getElementById('pack-games');
     const nick = document.getElementById('nick');
-    const render = document.getElementById('render');
     const KEY = 'prboomtv.launch';
 
     const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; } };
     const store = () => { try { localStorage.setItem(KEY, JSON.stringify(Object.fromEntries(new FormData(form)))); } catch {} };
 
-    function syncRender() {
-      const software = render.value === 'software';
-      for (const field of form.querySelectorAll('.gl-only')) {
+    /* lights, glow and smoothing are OpenGL's: off with software render */
+    function syncRender(scope) {
+      const software = scope.querySelector('.render').value === 'software';
+      for (const field of scope.querySelectorAll('.gl-only')) {
         field.classList.toggle('disabled', software);
         field.querySelector('select').disabled = software;
       }
     }
 
-    function tag(text, className = 'tag') {
-      const span = document.createElement('span');
-      span.className = className;
-      span.textContent = text;
-      return span;
+    /* the tabs: Play, and Download, which #download opens */
+    const tabs = { play: document.getElementById('tab-play'), download: document.getElementById('tab-download') };
+    function showTab(name) {
+      for (const [key, tab] of Object.entries(tabs)) {
+        tab.setAttribute('aria-selected', String(key === name));
+        document.getElementById(tab.getAttribute('aria-controls')).hidden = key !== name;
+      }
     }
+    tabs.play.addEventListener('click', () => { showTab('play'); history.replaceState(null, '', '#'); });
+    tabs.download.addEventListener('click', () => { showTab('download'); history.replaceState(null, '', '#download'); });
+    if (location.hash === '#download') showTab('download');
 
-    const games = await (await fetch('games.json')).json();
-    const live = new Map();
-    for (const [i, game] of games.entries()) {
+    function card(game, type, name, checked) {
       const card = document.createElement('label');
       card.className = 'game';
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'game';
-      radio.value = game.id;
-      radio.checked = i === 0;
+      const input = document.createElement('input');
+      input.type = type;
+      input.name = name;
+      input.value = game.id;
+      input.checked = checked;
       const art = document.createElement('img');
       art.className = 'banner';
       art.alt = '';
       art.loading = 'lazy';
       if (game.banner) art.src = game.banner;
-      const playing = tag('', 'playing');
-      playing.hidden = true;
-      live.set(game.id, playing);
-      const name = document.createElement('strong');
-      name.textContent = game.title;
+      const title = document.createElement('strong');
+      title.textContent = game.title;
       const tags = document.createElement('span');
       tags.className = 'tags';
-      if (game.demo) tags.append(tag('Demo'));
-      if (game.y90) tags.append(tag('90s'));
-      card.append(radio, art, playing, name, tags);
-      card.addEventListener('dblclick', () => form.requestSubmit());
-      list.append(card);
+      for (const [on, text] of [[game.demo, 'Demo'], [game.y90, '90s']]) {
+        if (!on) continue;
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = text;
+        tags.append(tag);
+      }
+      card.append(input, art, title, tags);
+      return card;
     }
 
-    function apply(values) {
+    const games = await (await fetch('games.json')).json();
+    for (const [i, game] of games.entries()) {
+      const play = card(game, 'radio', 'game', i === 0);
+      play.addEventListener('dblclick', () => form.requestSubmit());
+      list.append(play);
+      packList.append(card(game, 'checkbox', 'pack-game', true));
+    }
+
+    function apply(scope, values) {
       for (const [key, value] of Object.entries(values)) {
-        const fields = form.elements.namedItem(key);
+        const fields = scope.elements.namedItem(key);
         if (!fields) continue;
         if (fields instanceof RadioNodeList) {
           const radio = [...fields].find((r) => r.value === value);
@@ -169,17 +198,18 @@
       }
     }
 
-    const defaults = await loadOptions('defaults.txt').catch((e) => {
+    const options = (url) => loadOptions(url).catch((e) => {
       console.warn('[prboomtv]', e);
       return {};
     });
-    apply(defaults);
-    apply(load());
+    const defaults = await options('defaults.txt');
+    apply(form, defaults);
+    apply(form, load());
     for (const radio of form.querySelectorAll('input[type=radio]'))
       if (!form.querySelector(`input[name="${radio.name}"]:checked`)) radio.checked = true;
-    syncRender();
+    syncRender(form);
 
-    form.addEventListener('change', () => { syncRender(); store(); });
+    form.addEventListener('change', () => { syncRender(form); store(); });
     nick.addEventListener('input', store);
 
     /* only what differs from defaults.txt, which the game page falls back to */
@@ -198,9 +228,40 @@
       location.href = `${encodeURIComponent(game)}.html` + (params.size ? `#${params}` : '');
     });
 
+    /* the download: only the WADs, or PrBoomTV with them; the TV packages
+     * start from their own defaults, shown in full */
+    const system = document.getElementById('system');
+    const tvDefaults = { webos: 'defaults.txt', zaper: 'defaults_zaper.txt' };
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    function syncPack() {
+      const count = packList.querySelectorAll('input:checked').length;
+      const what = system.value === 'wads' ? 'Only' : 'PrBoomTV and';
+      document.getElementById('pack-games-note').textContent = `${what} ${plural(count, 'game', 'games')}. Pick the games to include.`;
+    }
+    system.addEventListener('change', async () => {
+      document.getElementById('extras').hidden = system.value === 'wads';
+      const tv = tvDefaults[system.value];
+      document.getElementById('tv').hidden = !tv;
+      if (tv) {
+        apply(pack, await options(tv));
+        syncRender(pack);
+      }
+      syncPack();
+    });
+    pack.addEventListener('change', (event) => {
+      if (event.target.closest('#tv')) syncRender(pack);
+      syncPack();
+    });
+    pack.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const status = document.getElementById('pack-status');
+      status.textContent = 'Downloads are not available yet.';
+      status.classList.add('error');
+    });
+    syncPack();
+
     const online = document.getElementById('online');
     const onlineText = document.getElementById('online-text');
-    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     let rooms = [];
     /* peers take a few seconds to meet: "none" only after a while */
     let settled = false;
@@ -210,11 +271,6 @@
       onlineText.textContent = players
         ? `${plural(players, 'player', 'players')} online in ${plural(rooms.length, 'room', 'rooms')}`
         : settled ? 'No rooms open right now' : 'Looking for rooms...';
-      for (const [id, badge] of live) {
-        const count = rooms.filter((room) => room.game === id).reduce((sum, room) => sum + room.players, 0);
-        badge.hidden = count === 0;
-        badge.textContent = `${count} playing`;
-      }
     };
     setTimeout(() => { settled = true; show(); }, 12000);
     watchLobby('prboomtv', (heard) => { rooms = heard; show(); })

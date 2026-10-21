@@ -1,7 +1,5 @@
 get_filename_component(DOPO_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
-# host tools run here at configure time, so they are built with the
-# machine's own c++, never with the cross toolchain
 find_program(DOPO_HOST_CXX NAMES c++ g++ clang++ REQUIRED NO_CMAKE_FIND_ROOT_PATH)
 
 function(dopo_host_tool name source)
@@ -20,11 +18,9 @@ function(dopo_host_tool name source)
     set(${name}_TOOL "${tool}" PARENT_SCOPE)
 endfunction()
 
-dopo_host_tool(dopo_patchs "${DOPO_DIR}/scripts/dopo_patchs.cpp")
+include("${CMAKE_CURRENT_LIST_DIR}/nim.cmake")
+dopo_nim_tool(dopo_patchs "${DOPO_DIR}/scripts/patchs.nim")
 
-# applies the /** @patch */ hunks of patch_files on top of source_dir into
-# output_dir (see scripts/dopo_patchs.cpp); out_var gets the patched files,
-# relative to source_dir
 function(dopo_apply_patchs out_var source_dir output_dir)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ARGN})
     execute_process(
@@ -40,8 +36,6 @@ function(dopo_apply_patchs out_var source_dir output_dir)
     set(${out_var} "${patched}" PARENT_SCOPE)
 endfunction()
 
-# the files of dir that carry /** @patch */ hunks go to patch_var, the
-# others (relative to dir) to other_var
 function(dopo_split_patchs patch_var other_var dir)
     file(GLOB_RECURSE files CONFIGURE_DEPENDS RELATIVE "${dir}" ${ARGN})
     set(patchs "")

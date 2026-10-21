@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Balatro</title>
+  <meta name="description" content="Your own Balatro, kept on this device.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Balatro">
+  <link rel="icon" href="{{root}}favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{root}}favicon-32x32.png">
+  <link rel="apple-touch-icon" href="{{root}}apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* love.js's own spinner gives way to a loading screen like PrBoomTV's */
+    #spinner { display: none !important; }
+    /* the game is the page's size: Emscripten pins the canvas to the
+     * window's first size in pixels, and its SDL resizes the game to the
+     * canvas's size in CSS, so turning a phone reaches love.resize */
+    #canvas {
+      width: 100vw !important;
+      height: 100vh !important;
+      height: 100dvh !important;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 16px;
+      background: #0d0b0a;
+      color: #9a8a7e;
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+    #loading[hidden] { display: none; }
+    #loading img {
+      display: block;
+      width: min(640px, 100%, 120vh);
+      aspect-ratio: 320 / 200;
+      image-rendering: pixelated;
+    }
+    #status { margin: 0; }
+    #status.error { color: #e8b04a; }
+    #loading a {
+      padding: 10px 28px;
+      border-radius: 6px;
+      background: #d6402b;
+      color: #fff6ee;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-decoration: none;
+      text-transform: uppercase;
+    }
+    #loading a[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="spinner" class="pending"></div>
+  <div id="loading">
+    <img src="../banner.png" alt="">
+    <p id="status">Loading Balatro...</p>
+    <a id="choose" href="../" hidden>Choose your copy</a>
+  </div>
+  <script>
+    /* installed or not, love.js is kept on this device for the next start;
+     * the first time, the worker also takes what loaded before it */
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.register('sw.js')
+        .then(() => navigator.serviceWorker.ready)
+        .then((registration) => registration.active.postMessage({
+          cache: [location.href.split('#')[0],
+                  ...performance.getEntriesByType('resource').map((entry) => entry.name)],
+        }))
+        .catch((e) => console.warn('[balatro] cache:', e));
+    }
+
+    const status = document.getElementById('status');
+    const missing = () => {
+      status.textContent = 'Balatro is not on this device yet: choose your copy first.';
+      document.getElementById('choose').hidden = false;
+    };
+
+    /* love.js marks its spinner '' once the game draws, 'error' if it fails */
+    new MutationObserver(() => {
+      const state = document.getElementById('spinner').className;
+      if (state === '') {
+        document.getElementById('loading').hidden = true;
+        /* the game starts at its own size: fit it to the page */
+        window.dispatchEvent(new Event('resize'));
+      } else if (state === 'error') {
+        status.textContent = 'Balatro could not start.';
+        status.classList.add('error');
+      }
+    }).observe(document.getElementById('spinner'), { attributes: true, attributeFilter: ['class'] });
+
+    /* the game is the one the Balatro page left in love.js's own store,
+     * where its player looks first */
+    const open = indexedDB.open('EM_PRELOAD_CACHE', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('PACKAGES');
+    open.onerror = missing;
+    open.onsuccess = () => {
+      const db = open.result;
+      const get = db.transaction('PACKAGES').objectStore('PACKAGES').get('Balatro.love');
+      get.onsuccess = () => {
+        db.close();
+        if (!get.result) {
+          missing();
+          return;
+        }
+        const player = document.createElement('script');
+        player.src = 'player.js?g=Balatro.love';
+        document.body.append(player);
+      };
+    };
+  </script>
+</body>
+</html>

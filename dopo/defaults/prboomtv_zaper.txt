@@ -1,0 +1,9 @@
+# Zaper TV boxes: the options a downloaded .ipks starts with
+prboom-resolution=1920x1080
+prboom-widescreen=enabled
+prboom-frameskip=0
+prboom-render=gl
+prboom-color_format=24bits (truecolor)
+prboom-dynlight=2
+prboom-glow=2
+prboom-scale=2

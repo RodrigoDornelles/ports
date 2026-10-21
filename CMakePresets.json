@@ -15,7 +15,8 @@
         "PORTS_WASM": "ON",
         "PORTS_USE_SDL_LIBRETRO": "OFF",
         "PORTS_USE_PRBOOMTV_LIBRETRO": "ON",
-        "PORTS_USE_RETROARCH": "ON"
+        "PORTS_USE_RETROARCH": "ON",
+        "DOPO_USE_BALATRO_WEB_PATCH": "ON"
       }
     }
   ],

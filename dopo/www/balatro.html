@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{> head}}
+</head>
+<body>
+  <main>
+{{> header}}
+    <p class="lead">
+      <span data-tab="play">Play your own Balatro in the browser, as it is. Your copy never leaves your computer.</span>
+      <span data-tab="download" hidden>Bring your own Balatro <span class="version"></span>. It is patched here, in your browser, and never leaves your computer.</span>
+    </p>
+
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-play" aria-selected="true">Play</button>
+      <button type="button" role="tab" id="tab-download" aria-selected="false">Download</button>
+    </div>
+
+    <div class="bar">
+      <div class="field grow">
+        <span>Your copy</span>
+        <label class="file" id="drop">
+          <input type="file" id="file" accept=".exe,.love">
+          <span class="pick"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 15h2V6.8l2.8 2.8 1.4-1.4L8 3 2.8 8.2l1.4 1.4L7 6.8zM2 0h12v2H2z"/></svg>Choose file</span>
+          <span class="name"><span id="file-name">Balatro.exe or Balatro.love, or drop it here</span></span>
+        </label>
+      </div>
+      <label class="field" data-tab="download" hidden>
+        <span>System</span>
+        <select id="format">
+          <option value="love">LÖVE (.love)</option>
+          <option value="webos" disabled>webOS TV (.ipk)</option>
+          <option value="zaper" disabled>Zaper (.ipks)</option>
+        </select>
+      </label>
+      <button type="button" class="go" id="go" disabled>Play</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+
+    <section data-tab="play">
+      <h2>Install it as an app</h2>
+      <p class="note">Play runs the original game, without patches. Installed, it opens from your apps and keeps your copy and your saves.</p>
+      <ol class="howto">
+        <li><div class="shot">screenshot</div><b>Press Play</b><span>The game opens on its own page.</span></li>
+        <li><div class="shot">screenshot</div><b>Install</b><span>In the browser's menu, choose Install app, or Add to Home screen on a phone.</span></li>
+        <li><div class="shot">screenshot</div><b>Open Balatro</b><span>It is now with your other apps, and works offline.</span></li>
+      </ol>
+    </section>
+
+    <section data-tab="download" hidden>
+      <label class="all"><input type="checkbox" id="all"><h2>Patches</h2><small id="all-count"></small></label>
+      <div class="groups" id="groups"></div>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="patchs.js"></script>
+  <script type="module">
+    import { GAME_VERSION, loadPatchs, loadWebPatchs, loadSelection, findConflicts, openGame, buildLove,
+             storedGame, storePlayable } from './balatro.js';
+
+    const $ = (id) => document.getElementById(id);
+    const status = (text, error = false) => {
+      $('status').textContent = text;
+      $('status').classList.toggle('error', error);
+    };
+    for (const span of document.querySelectorAll('.version')) span.textContent = GAME_VERSION;
+
+    let patchs = [];
+    let conflicts = new Map();
+    let most = 0;
+    let game = null;
+    let busy = false;
+    let tab = 'play';
+    /* the copy left by an earlier Play, rebuilt on every Play */
+    let stored = await storedGame().catch(() => null);
+    let playable = Boolean(stored);
+
+    const box = (name) => $('groups').querySelector(`input[value="${name}"]`);
+    const titleOf = (name) => patchs.find((patch) => patch.name === name).title;
+    /* Play takes the copy chosen, or the one already on this device */
+    const refresh = () => {
+      const ready = game && game.version === GAME_VERSION;
+      $('go').disabled = busy || !(ready || (tab === 'play' && playable && !game));
+      $('go').textContent = tab === 'play' ? 'Play' : 'Download';
+    };
+
+    /* the tabs: Play, the game as it is, and Download, patched */
+    function showTab(name) {
+      tab = name;
+      for (const button of document.querySelectorAll('[role=tab]'))
+        button.setAttribute('aria-selected', String(button.id === `tab-${name}`));
+      for (const el of document.querySelectorAll('[data-tab]')) el.hidden = el.dataset.tab !== name;
+      status(name === 'play' && playable && !game ? 'Balatro is on this device: Play opens it.' : '');
+      refresh();
+    }
+    $('tab-play').addEventListener('click', () => { showTab('play'); history.replaceState(null, '', '#'); });
+    $('tab-download').addEventListener('click', () => { showTab('download'); history.replaceState(null, '', '#download'); });
+    showTab(location.hash === '#download' ? 'download' : 'play');
+
+    /* the counts of each group and of all: full is every patch that goes
+     * together, the first of a conflicting pair */
+    function sync() {
+      for (const group of $('groups').children) {
+        const items = [...group.querySelectorAll('.checks input')];
+        const on = items.filter((input) => input.checked).length;
+        const all = group.querySelector('summary input');
+        all.checked = on === items.length;
+        all.indeterminate = on > 0 && on < items.length;
+        group.querySelector('summary small').textContent = `${on} of ${items.length}`;
+      }
+      const on = $('groups').querySelectorAll('.checks input:checked').length;
+      $('all').checked = on === most;
+      $('all').indeterminate = on > 0 && on < most;
+      $('all-count').textContent = `${on} of ${patchs.length}`;
+    }
+
+    /* checking a patch unchecks the ones it can not go with */
+    const choose = (input) => {
+      if (input.checked) for (const other of conflicts.get(input.value)) box(other).checked = false;
+    };
+
+    function select(names) {
+      for (const patch of patchs) box(patch.name).checked = false;
+      for (const patch of patchs) {
+        const input = box(patch.name);
+        input.checked = names.includes(patch.name) && ![...conflicts.get(patch.name)].some((other) => box(other).checked);
+      }
+      sync();
+    }
+    const everything = () => patchs.map((patch) => patch.name);
+
+    try {
+      patchs = await loadPatchs(location.href);
+      conflicts = findConflicts(patchs);
+      for (const name of new Set(patchs.map((patch) => patch.group))) {
+        const group = document.createElement('details');
+        group.className = 'group';
+        group.innerHTML = '<summary><input type="checkbox"><b></b><small></small></summary><ul class="checks"></ul>';
+        group.querySelector('summary input').setAttribute('aria-label', `All ${name} patches`);
+        group.querySelector('b').textContent = name;
+        const list = group.querySelector('ul');
+        for (const patch of patchs.filter((patch) => patch.group === name)) {
+          const item = document.createElement('li');
+          item.innerHTML = '<label><input type="checkbox"><span class="title"></span><span class="description"></span></label>';
+          item.querySelector('input').value = patch.name;
+          item.querySelector('.title').textContent = patch.title;
+          item.querySelector('.description').textContent = patch.description;
+          if (conflicts.get(patch.name).size) {
+            const conflict = document.createElement('span');
+            conflict.className = 'conflict';
+            conflict.textContent = 'Not with: ' + [...conflicts.get(patch.name)].map(titleOf).join(', ');
+            item.querySelector('label').append(conflict);
+          }
+          list.append(item);
+        }
+        /* the group's checkbox sits in the summary: it checks the group,
+         * the rest of the summary folds it */
+        group.querySelector('summary').addEventListener('click', (event) => {
+          if (!event.target.matches('input')) return;
+          event.preventDefault();
+          const all = event.target;
+          const on = !(all.checked && !all.indeterminate);
+          for (const input of list.querySelectorAll('input')) input.checked = on;
+          if (on) for (const input of list.querySelectorAll('input')) if (input.checked) choose(input);
+          setTimeout(sync);
+        });
+        list.addEventListener('change', (event) => { choose(event.target); sync(); });
+        $('groups').append(group);
+      }
+      select(everything());
+      most = $('groups').querySelectorAll('.checks input:checked').length;
+      sync();
+    } catch (error) {
+      status(`Could not load the patches: ${error.message}`, true);
+    }
+
+    $('all').addEventListener('click', (event) => {
+      event.preventDefault();
+      const full = $('groups').querySelectorAll('.checks input:checked').length === most;
+      setTimeout(() => select(full ? [] : everything()));
+    });
+
+    /* a system's own choice of patches, as for Zaper's TV boxes */
+    $('format').addEventListener('change', async () => {
+      if ($('format').value !== 'zaper') return;
+      try {
+        select(await loadSelection('defaults_zaper.txt'));
+      } catch (error) {
+        console.warn('[balatro]', error);
+      }
+    });
+
+    const open = async (file) => {
+      if (!file || busy) return;
+      game = null;
+      $('drop').classList.remove('loaded');
+      status(`Reading ${file.name}…`);
+      refresh();
+      try {
+        game = await openGame(await file.arrayBuffer());
+        $('file-name').textContent = `${file.name} · Balatro ${game.version}`;
+        if (game.version !== GAME_VERSION) {
+          status(`This is Balatro ${game.version}; the patches are for ${GAME_VERSION}.`, true);
+        } else {
+          $('drop').classList.add('loaded');
+          status('');
+        }
+      } catch (error) {
+        game = null;
+        status(`${file.name}: ${error.message}`, true);
+      }
+      refresh();
+    };
+
+    $('file').addEventListener('change', () => open($('file').files[0]));
+    addEventListener('dragover', (event) => {
+      event.preventDefault();
+      $('drop').classList.add('over');
+    });
+    addEventListener('dragleave', (event) => {
+      if (!event.relatedTarget) $('drop').classList.remove('over');
+    });
+    addEventListener('drop', (event) => {
+      event.preventDefault();
+      $('drop').classList.remove('over');
+      open(event.dataTransfer.files[0]);
+    });
+
+    $('go').addEventListener('click', async () => {
+      if (tab === 'play') {
+        busy = true;
+        refresh();
+        try {
+          await storePlayable(game ?? stored, await loadWebPatchs(location.href),
+            (percent) => status(`Preparing… ${Math.floor(percent)}%`));
+        } catch (error) {
+          busy = false;
+          status(error.message, true);
+          refresh();
+          return;
+        }
+        location.href = 'play/';
+        return;
+      }
+      const chosen = patchs.filter((patch) => box(patch.name).checked);
+      busy = true;
+      refresh();
+      try {
+        const blob = await buildLove(game, chosen,
+          (percent) => status(`Packing… ${Math.floor(percent)}%`));
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'Balatro.love';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+        status(`Done: Balatro.love with ${chosen.length} patches, ${(blob.size / 1048576).toFixed(1)} MB.`);
+      } catch (error) {
+        status(error.message, true);
+      }
+      busy = false;
+      refresh();
+    });
+    refresh();
+  </script>
+</body>
+</html>
