@@ -58,6 +58,7 @@ list(APPEND balatro_outputs "${balatro_www}/index.html")
 set(balatro_copies
     "${DOPO_DIR}/www/balatro.js" balatro.js
     "${DOPO_DIR}/assets/balatro/320x200.png" banner.png
+    "${DOPO_DIR}/assets/balatro/1280x800.png" screenshot.png
     "${DOPO_DIR}/assets/balatro/192x192.png" icon-192x192.png
     "${DOPO_DIR}/assets/balatro/512x512.png" icon-512x512.png
     "${DOPO_DIR}/defaults/balatro_zaper.txt" defaults_zaper.txt)

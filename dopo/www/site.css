@@ -196,6 +196,9 @@ select {
 
 .go:hover:not(:disabled) { filter: brightness(1.1); }
 .go:disabled { opacity: 0.45; cursor: not-allowed; }
+/* a bar with nothing but its button */
+.bar.solo { justify-content: center; }
+.bar.solo .go { margin-left: 0; }
 
 .status { min-height: 1.5em; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .status.error { color: var(--ok); }

@@ -67,10 +67,13 @@ function packages(mode, use) {
         open.onupgradeneeded = () => open.result.createObjectStore('PACKAGES');
         open.onerror = () => reject(open.error);
         open.onsuccess = () => {
+            /* done when the transaction is, not its request: a page leaving
+             * right after would take an unfinished write with it */
             const db = open.result;
-            const request = use(db.transaction('PACKAGES', mode).objectStore('PACKAGES'));
-            request.onsuccess = () => { db.close(); resolve(request.result); };
-            request.onerror = () => { db.close(); reject(request.error); };
+            const transaction = db.transaction('PACKAGES', mode);
+            const request = use(transaction.objectStore('PACKAGES'));
+            transaction.oncomplete = () => { db.close(); resolve(request.result); };
+            transaction.onerror = transaction.onabort = () => { db.close(); reject(transaction.error ?? request.error); };
         };
     });
 }

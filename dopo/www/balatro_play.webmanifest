@@ -15,6 +15,6 @@
     {"src": "../icon-512x512.png", "sizes": "512x512", "type": "image/png"}
   ],
   "screenshots": [
-    {"src": "../banner.png", "sizes": "320x200", "type": "image/png", "form_factor": "wide", "label": "Balatro"}
+    {"src": "../screenshot.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Balatro"}
   ]
 }
