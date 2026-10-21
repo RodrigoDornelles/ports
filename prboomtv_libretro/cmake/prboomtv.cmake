@@ -417,12 +417,29 @@ if (EMSCRIPTEN)
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
-    foreach(file index.html style.css defaults.txt)
+    # style.css is the game page's; the options' defaults come from
+    # dopo/defaults, the browser's under the name the pages fetch
+    foreach(copy "www/style.css=style.css"
+                 "../dopo/defaults/prboomtv_web.txt=defaults.txt"
+                 "../dopo/defaults/prboomtv_zaper.txt=defaults_zaper.txt")
+        string(REPLACE "=" ";" copy "${copy}")
+        list(GET copy 0 source)
+        list(GET copy 1 file)
+        get_filename_component(source "${PRBOOMTV_DIR}/${source}" ABSOLUTE)
         add_custom_command(OUTPUT "${prboomtv_www}/${file}"
-            COMMAND "${CMAKE_COMMAND}" -E copy "${PRBOOMTV_DIR}/www/${file}" "${prboomtv_www}/${file}"
-            DEPENDS "${PRBOOMTV_DIR}/www/${file}")
+            COMMAND "${CMAKE_COMMAND}" -E copy "${source}" "${prboomtv_www}/${file}"
+            DEPENDS "${source}")
         list(APPEND prboomtv_www_outputs "${prboomtv_www}/${file}")
     endforeach()
+
+    include("${DOPO_DIR}/cmake/www.cmake")
+    dopo_www_page("${prboomtv_www}/index.html" "${PRBOOMTV_DIR}/www/index.html"
+        --partials "${PRBOOMTV_DIR}/www/partials"
+        "title=PrBoomTV"
+        "description=Doom and friends in the browser, alone or with friends."
+        "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
+        "title_before=PrBoom" "title_accent=TV" "online=1")
+    list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
 
     # offline, the copy of the last configure stands in
     set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")

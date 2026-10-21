@@ -2,8 +2,8 @@
  * The Balatro patcher: opens the player's Balatro.exe or Balatro.love,
  * applies the chosen dopo_* patchs with dopoPatchs (patchs.nim built for
  * JS) and packs a new .love. A patch is one file per language it touches,
- * dopo_<name>.lua for the Lua sources and dopo_<name>.fs for the shaders. JSZip and dopoPatchs are globals, loaded
- * by the page as classic scripts.
+ * dopo_<name>.lua for the Lua sources and dopo_<name>.fs for the shaders.
+ * JSZip and dopoPatchs are globals, loaded by the page as classic scripts.
  */
 
 /** the patchs are line based: they only fit this release */
@@ -15,19 +15,21 @@ const call = (request) => {
     return response;
 };
 
+const fetchOk = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${url}: ${response.status}`);
+    return response;
+};
+
 /**
- * The patchs listed in base/patchs.json, in order, each {name, files:
- * [{name, text}], title, description}; title and description come from the
- * line comment (-- or //) that opens its first file.
+ * The patchs of base/patchs.json's groups, in order, each {name, group,
+ * files: [{name, text}], title, description}; title and description come
+ * from the line comment (-- or //) that opens its first file.
  */
 export async function loadPatchs(base) {
-    const fetchOk = async (url) => {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`${url}: ${response.status}`);
-        return response;
-    };
-    const list = await (await fetchOk(new URL('patchs.json', base))).json();
-    return Promise.all(list.map(async ({name, files}) => {
+    const groups = await (await fetchOk(new URL('patchs.json', base))).json();
+    const list = groups.flatMap(({group, patchs}) => patchs.map((patch) => ({...patch, group})));
+    return Promise.all(list.map(async ({name, group, files}) => {
         files = await Promise.all(files.map(async (file) => ({
             name: file,
             text: await (await fetchOk(new URL(`patchs/${file}`, base))).text(),
@@ -39,8 +41,14 @@ export async function loadPatchs(base) {
             header.push(comment[1]);
         }
         const [title = name, ...rest] = header;
-        return {name, files, title, description: rest.join(' ').trim()};
+        return {name, group, files, title, description: rest.join(' ').trim()};
     }));
+}
+
+/** the patch names a defaults file lists, one a line ('#' starts a comment) */
+export async function loadSelection(url) {
+    const text = await (await fetchOk(url)).text();
+    return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
 }
 
 const filesOf = (patchs) => patchs.flatMap((patch) => patch.files);

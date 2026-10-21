@@ -1,0 +1,14 @@
+# Zaper TV boxes: the patches a downloaded .ipks starts with, one a line
+dopo_low_graphics
+dopo_crt_toggle
+dopo_reduced_motion
+dopo_solid_background
+dopo_render_scale
+dopo_quiet_logs
+dopo_texture_memory
+dopo_no_collabs
+dopo_no_splash_logos
+dopo_slim_fonts
+dopo_font_atlas
+dopo_canvas_release
+dopo_gc_pressure

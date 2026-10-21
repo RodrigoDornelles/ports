@@ -32,9 +32,15 @@ include(dopo/cmake/dopo.cmake)
 set(PORTS_DIST "${CMAKE_BINARY_DIR}/dist")
 
 if (EMSCRIPTEN)
-    add_custom_command(OUTPUT "${PORTS_DIST}/index.html"
-        COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/www/index.html" "${PORTS_DIST}/index.html"
-        DEPENDS "${DOPO_DIR}/www/index.html")
+    include(dopo/cmake/www.cmake)
+    set(dopo_home_balatro "")
+    if (DOPO_USE_BALATRO_WEB_PATCH)
+        set(dopo_home_balatro "balatro=1")
+    endif()
+    dopo_www_page("${PORTS_DIST}/index.html" "${DOPO_DIR}/www/index.html"
+        "title=Dornelles Ports"
+        "description=Classic games ported to the browser and to TV boxes, alone or with friends."
+        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro})
     add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")
 endif()
 
