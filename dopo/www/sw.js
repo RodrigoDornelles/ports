@@ -1,11 +1,11 @@
 /**
- * The installed games' cache: every file a game page loads (the page, the
- * core, the game's playlist and WADs, Trystero for multiplayer) is kept, so
- * the next start comes from this device. A cached file is answered at once
- * and fetched again behind it: an update arrives whole on the start after,
- * never a new core.js with an old core.wasm.
+ * The installed games' cache, one per folder it serves: every file a game
+ * page loads (the page, the engine, the game's files, Trystero for
+ * multiplayer) is kept, so the next start comes from this device. A cached
+ * file is answered at once and fetched again behind it: an update arrives
+ * whole on the start after, never a new core.js with an old core.wasm.
  */
-const CACHE = 'prboomtv';
+const CACHE = self.registration.scope;
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));

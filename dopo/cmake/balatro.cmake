@@ -5,27 +5,43 @@ set(BALATRO_DIR "${DOPO_DIR}/games/balatro")
 
 include("${CMAKE_CURRENT_LIST_DIR}/nim.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/www.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/lovejs.cmake")
 
-# the page's groups of patchs and their order; on a conflict the first one
-# listed wins. Each is dopo_<name>.lua and/or dopo_<name>.fs
+# the page's groups of patchs, a folder each, and their order; on a
+# conflict the first one listed wins. Each is <name>.lua and/or <name>.fs
 set(BALATRO_GROUPS Performance Memory)
 set(BALATRO_PERFORMANCE
-    dopo_low_graphics
-    dopo_crt_toggle
-    dopo_reduced_motion
-    dopo_solid_background
-    dopo_cheap_background
-    dopo_render_scale
-    dopo_quiet_logs
-    dopo_screensize)
+    low_graphics
+    crt_toggle
+    reduced_motion
+    solid_background
+    cheap_background
+    render_scale
+    quiet_logs
+    screensize)
 set(BALATRO_MEMORY
-    dopo_texture_memory
-    dopo_no_collabs
-    dopo_no_splash_logos
-    dopo_slim_fonts
-    dopo_font_atlas
-    dopo_canvas_release
-    dopo_gc_pressure)
+    texture_memory
+    no_collabs
+    no_splash_logos
+    slim_fonts
+    font_atlas
+    canvas_release
+    gc_pressure)
+
+# lovejs is the browser's: love.js's fixes (named after its files) and
+# modules, and the patchs Balatro needs to run there, always applied when it
+# plays in the browser, never shown nor put in a download
+file(GLOB balatro_web CONFIGURE_DEPENDS RELATIVE "${BALATRO_DIR}/lovejs"
+    "${BALATRO_DIR}/lovejs/*.lua" "${BALATRO_DIR}/lovejs/*.fs")
+set(BALATRO_WEB "")
+foreach(file ${balatro_web})
+    file(STRINGS "${BALATRO_DIR}/lovejs/${file}" marks REGEX "@patch[ \t]")
+    if (marks AND NOT file IN_LIST LOVEJS_NAMES)
+        string(REGEX REPLACE "\\.[^.]*$" "" name "${file}")
+        list(APPEND BALATRO_WEB "${name}")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES BALATRO_WEB)
 
 set(balatro_www "${PORTS_DIST}/balatro")
 set(balatro_outputs "${balatro_www}/patchs.js")
@@ -43,29 +59,51 @@ set(balatro_copies
     "${DOPO_DIR}/www/balatro.js" balatro.js
     "${DOPO_DIR}/assets/balatro.png" banner.png
     "${DOPO_DIR}/defaults/balatro_zaper.txt" defaults_zaper.txt)
-set(balatro_groups "")
-foreach(group ${BALATRO_GROUPS})
-    string(TOUPPER "${group}" key)
-    set(patchs "")
-    foreach(patch ${BALATRO_${key}})
+# the JSON list of the patchs in dir (relative to games/balatro), and
+# their files to the copies
+function(balatro_list out_var dir)
+    set(entries "")
+    foreach(patch ${ARGN})
         set(files "")
         foreach(ext lua fs)
-            if (EXISTS "${BALATRO_DIR}/${patch}.${ext}")
-                list(APPEND balatro_copies "${BALATRO_DIR}/${patch}.${ext}" "patchs/${patch}.${ext}")
+            if (EXISTS "${BALATRO_DIR}/${dir}/${patch}.${ext}")
+                list(APPEND balatro_copies "${BALATRO_DIR}/${dir}/${patch}.${ext}" "patchs/${patch}.${ext}")
                 list(APPEND files "\"${patch}.${ext}\"")
             endif()
         endforeach()
         if (NOT files)
-            message(FATAL_ERROR "balatro: no ${BALATRO_DIR}/${patch}.lua or .fs")
+            message(FATAL_ERROR "balatro: no ${BALATRO_DIR}/${dir}/${patch}.lua or .fs")
         endif()
         list(JOIN files ", " files)
-        list(APPEND patchs "    {\"name\": \"${patch}\", \"files\": [${files}]}")
+        list(APPEND entries "{\"name\": \"${patch}\", \"files\": [${files}]}")
     endforeach()
-    list(JOIN patchs ",\n" patchs)
-    list(APPEND balatro_groups "  {\"group\": \"${group}\", \"patchs\": [\n${patchs}\n  ]}")
+    list(JOIN entries ",\n    " entries)
+    set(${out_var} "${entries}" PARENT_SCOPE)
+    set(balatro_copies "${balatro_copies}" PARENT_SCOPE)
+endfunction()
+
+set(balatro_groups "")
+foreach(group ${BALATRO_GROUPS})
+    string(TOUPPER "${group}" key)
+    string(TOLOWER "${group}" dir)
+    balatro_list(entries "${dir}" ${BALATRO_${key}})
+    list(APPEND balatro_groups "  {\"group\": \"${group}\", \"patchs\": [\n    ${entries}\n  ]}")
 endforeach()
 list(JOIN balatro_groups ",\n" balatro_groups)
 file(CONFIGURE OUTPUT "${balatro_www}/patchs.json" CONTENT "[\n${balatro_groups}\n]\n")
+
+balatro_list(entries lovejs ${BALATRO_WEB})
+file(CONFIGURE OUTPUT "${balatro_www}/web.json" CONTENT "[\n    ${entries}\n]\n")
+
+# the game in the browser, installable: love.js with the game the page
+# leaves on the device
+dopo_lovejs(balatro_play_outputs "${balatro_www}/play" "${BALATRO_DIR}/lovejs")
+list(APPEND balatro_outputs ${balatro_play_outputs})
+dopo_www_page("${balatro_www}/play/index.html" "${DOPO_DIR}/www/balatro_play.html" "root=../../")
+list(APPEND balatro_outputs "${balatro_www}/play/index.html")
+list(APPEND balatro_copies
+    "${DOPO_DIR}/www/balatro_play.webmanifest" play/manifest.webmanifest
+    "${DOPO_DIR}/www/sw.js" play/sw.js)
 
 while (balatro_copies)
     list(POP_FRONT balatro_copies source file)

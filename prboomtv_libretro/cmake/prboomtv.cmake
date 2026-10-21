@@ -419,7 +419,7 @@ if (EMSCRIPTEN)
     set(prboomtv_www_outputs "")
     # style.css is the game page's; the options' defaults come from
     # dopo/defaults, the browser's under the name the pages fetch
-    foreach(copy "www/style.css=style.css" "www/sw.js=sw.js"
+    foreach(copy "www/style.css=style.css" "../dopo/www/sw.js=sw.js"
                  "../dopo/defaults/prboomtv_web.txt=defaults.txt"
                  "../dopo/defaults/prboomtv_zaper.txt=defaults_zaper.txt")
         string(REPLACE "=" ";" copy "${copy}")

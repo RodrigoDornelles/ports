@@ -22,13 +22,11 @@ const fetchOk = async (url) => {
 };
 
 /**
- * The patchs of base/patchs.json's groups, in order, each {name, group,
- * files: [{name, text}], title, description}; title and description come
- * from the line comment (-- or //) that opens its first file.
+ * The patchs of a list, each {name, group, files: [{name, text}], title,
+ * description}; title and description come from the line comment (-- or
+ * //) that opens its first file.
  */
-export async function loadPatchs(base) {
-    const groups = await (await fetchOk(new URL('patchs.json', base))).json();
-    const list = groups.flatMap(({group, patchs}) => patchs.map((patch) => ({...patch, group})));
+async function fetchPatchs(base, list) {
     return Promise.all(list.map(async ({name, group, files}) => {
         files = await Promise.all(files.map(async (file) => ({
             name: file,
@@ -43,6 +41,48 @@ export async function loadPatchs(base) {
         const [title = name, ...rest] = header;
         return {name, group, files, title, description: rest.join(' ').trim()};
     }));
+}
+
+/** the patchs of base/patchs.json's groups, in order */
+export async function loadPatchs(base) {
+    const groups = await (await fetchOk(new URL('patchs.json', base))).json();
+    return fetchPatchs(base, groups.flatMap(({group, patchs}) => patchs.map((patch) => ({...patch, group}))));
+}
+
+/** the patchs of base/web.json, which the game needs to run in a browser */
+export async function loadWebPatchs(base) {
+    return fetchPatchs(base, await (await fetchOk(new URL('web.json', base))).json());
+}
+
+/* the game the play page runs: in love.js's own store, where its player
+ * looks first, under the name the play page asks it for */
+const STORE = 'EM_PRELOAD_CACHE';
+const PACKAGE = 'Balatro.love';
+
+function packages(mode, use) {
+    return new Promise((resolve, reject) => {
+        const open = indexedDB.open(STORE, 1);
+        open.onupgradeneeded = () => open.result.createObjectStore('PACKAGES');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const request = use(db.transaction('PACKAGES', mode).objectStore('PACKAGES'));
+            request.onsuccess = () => { db.close(); resolve(request.result); };
+            request.onerror = () => { db.close(); reject(request.error); };
+        };
+    });
+}
+
+/** whether a game is on this device for the play page */
+export async function hasPlayable() {
+    return Boolean(await packages('readonly', (store) => store.getKey(PACKAGE)).catch(() => undefined));
+}
+
+/** leaves game, with what it needs to run in a browser, for the play page */
+export async function storePlayable(game, webPatchs, progress) {
+    const blob = await buildLove(game, webPatchs, progress);
+    const data = new Uint8Array(await blob.arrayBuffer());
+    await packages('readwrite', (store) => store.put(data, PACKAGE));
 }
 
 /** the patch names a defaults file lists, one a line ('#' starts a comment) */

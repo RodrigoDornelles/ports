@@ -56,7 +56,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="patchs.js"></script>
   <script type="module">
-    import { GAME_VERSION, loadPatchs, loadSelection, findConflicts, openGame, buildLove } from './balatro.js';
+    import { GAME_VERSION, loadPatchs, loadWebPatchs, loadSelection, findConflicts, openGame, buildLove,
+             hasPlayable, storePlayable } from './balatro.js';
 
     const $ = (id) => document.getElementById(id);
     const status = (text, error = false) => {
@@ -71,11 +72,14 @@
     let game = null;
     let busy = false;
     let tab = 'play';
+    let playable = await hasPlayable();
 
     const box = (name) => $('groups').querySelector(`input[value="${name}"]`);
     const titleOf = (name) => patchs.find((patch) => patch.name === name).title;
+    /* Play takes the copy chosen, or the one already on this device */
     const refresh = () => {
-      $('go').disabled = busy || !game || game.version !== GAME_VERSION;
+      const ready = game && game.version === GAME_VERSION;
+      $('go').disabled = busy || !(ready || (tab === 'play' && playable && !game));
       $('go').textContent = tab === 'play' ? 'Play' : 'Download';
     };
 
@@ -85,12 +89,12 @@
       for (const button of document.querySelectorAll('[role=tab]'))
         button.setAttribute('aria-selected', String(button.id === `tab-${name}`));
       for (const el of document.querySelectorAll('[data-tab]')) el.hidden = el.dataset.tab !== name;
-      status('');
+      status(name === 'play' && playable && !game ? 'Balatro is on this device: Play opens it.' : '');
       refresh();
     }
     $('tab-play').addEventListener('click', () => { showTab('play'); history.replaceState(null, '', '#'); });
     $('tab-download').addEventListener('click', () => { showTab('download'); history.replaceState(null, '', '#download'); });
-    if (location.hash === '#download') showTab('download');
+    showTab(location.hash === '#download' ? 'download' : 'play');
 
     /* the counts of each group and of all: full is every patch that goes
      * together, the first of a conflicting pair */
@@ -223,7 +227,20 @@
 
     $('go').addEventListener('click', async () => {
       if (tab === 'play') {
-        status('Playing in the browser is not available yet.', true);
+        if (game) {
+          busy = true;
+          refresh();
+          try {
+            await storePlayable(game, await loadWebPatchs(location.href),
+              (percent) => status(`Preparing… ${Math.floor(percent)}%`));
+          } catch (error) {
+            busy = false;
+            status(error.message, true);
+            refresh();
+            return;
+          }
+        }
+        location.href = 'play/';
         return;
       }
       const chosen = patchs.filter((patch) => box(patch.name).checked);
