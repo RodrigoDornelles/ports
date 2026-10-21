@@ -35,7 +35,8 @@ dopo_www_page("${balatro_www}/index.html" "${DOPO_DIR}/www/balatro.html"
     "title=Balatro"
     "description=Your own Balatro in the browser, or patched lighter for TV boxes and handhelds."
     "root=../" "back=../" "source=/tree/main/dopo/games/balatro"
-    "title_before=Bal" "title_accent=a" "title_after=tro")
+    "title_before=Bal" "title_accent=a" "title_after=tro"
+    "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/balatro.png")
 list(APPEND balatro_outputs "${balatro_www}/index.html")
 
 set(balatro_copies

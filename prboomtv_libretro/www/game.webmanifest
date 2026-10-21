@@ -1,0 +1,20 @@
+{
+  "id": "{{id}}.html",
+  "name": {{{title_json}}},
+  "short_name": {{{title_json}}},
+  "description": {{{description_json}}},
+  "start_url": "{{id}}.html",
+  "scope": "{{id}}.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["games"],
+  "icons": [
+    {"src": "../android-chrome-192x192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "../android-chrome-512x512.png", "sizes": "512x512", "type": "image/png"}
+  ]{{#banner}},
+  "screenshots": [
+    {"src": {{{banner_json}}}, "sizes": "320x200", "type": "image/png", "form_factor": "wide", "label": {{{title_json}}}}
+  ]{{/banner}}
+}

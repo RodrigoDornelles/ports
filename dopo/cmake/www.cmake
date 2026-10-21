@@ -14,10 +14,17 @@ endif()
 
 dopo_nim_tool(dopo_www "${DOPO_DIR}/scripts/www.nim" "--path:${NIM_MUSTACHE_DIR}/src")
 
-add_custom_command(OUTPUT "${PORTS_DIST}/site.css"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/www/site.css" "${PORTS_DIST}/site.css"
-    DEPENDS "${DOPO_DIR}/www/site.css")
-add_custom_target(dopo_site ALL DEPENDS "${PORTS_DIST}/site.css")
+# the stylesheet and the site's icons, at the root of the site
+set(dopo_site_outputs "")
+foreach(source www/site.css assets/favicon.ico assets/favicon-16x16.png assets/favicon-32x32.png
+        assets/apple-touch-icon.png assets/android-chrome-192x192.png assets/android-chrome-512x512.png)
+    get_filename_component(file "${source}" NAME)
+    add_custom_command(OUTPUT "${PORTS_DIST}/${file}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${DOPO_DIR}/${source}" "${PORTS_DIST}/${file}"
+        DEPENDS "${DOPO_DIR}/${source}")
+    list(APPEND dopo_site_outputs "${PORTS_DIST}/${file}")
+endforeach()
+add_custom_target(dopo_site ALL DEPENDS ${dopo_site_outputs})
 
 # renders template into output; the rest is passed to www.nim: more
 # --partials dirs, --data files and key=value

@@ -419,7 +419,7 @@ if (EMSCRIPTEN)
     set(prboomtv_www_outputs "")
     # style.css is the game page's; the options' defaults come from
     # dopo/defaults, the browser's under the name the pages fetch
-    foreach(copy "www/style.css=style.css"
+    foreach(copy "www/style.css=style.css" "www/sw.js=sw.js"
                  "../dopo/defaults/prboomtv_web.txt=defaults.txt"
                  "../dopo/defaults/prboomtv_zaper.txt=defaults_zaper.txt")
         string(REPLACE "=" ";" copy "${copy}")
@@ -438,7 +438,8 @@ if (EMSCRIPTEN)
         "title=PrBoomTV"
         "description=Doom and friends in the browser, alone or with friends."
         "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
-        "title_before=PrBoom" "title_accent=TV" "online=1")
+        "title_before=PrBoom" "title_accent=TV" "online=1"
+        "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
     list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
 
     # offline, the copy of the last configure stands in
@@ -458,13 +459,15 @@ if (EMSCRIPTEN)
 
     # a page per game and the index's list (scripts/games.nim)
     include("${DOPO_DIR}/cmake/nim.cmake")
-    dopo_nim_tool(prboomtv_games "${PRBOOMTV_DIR}/scripts/games.nim")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PRBOOMTV_DIR}/www/game.html")
+    dopo_nim_tool(prboomtv_games "${PRBOOMTV_DIR}/scripts/games.nim" "--path:${NIM_MUSTACHE_DIR}/src")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PRBOOMTV_DIR}/www/game.html" "${PRBOOMTV_DIR}/www/game.webmanifest")
     execute_process(
         COMMAND "${prboomtv_games_TOOL}"
             --games "${prboomtv_games_source}"
             --url "${PRBOOMTV_GAMES_URL}"
             --template "${PRBOOMTV_DIR}/www/game.html"
+            --manifest "${PRBOOMTV_DIR}/www/game.webmanifest"
             --output "${prboomtv_www}"
         RESULT_VARIABLE prboomtv_games_result
         ERROR_VARIABLE prboomtv_games_error)
