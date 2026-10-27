@@ -256,6 +256,29 @@ set(prboomtv_upstream_files
     libretro/libretro-common/rthreads/retro_eventcount.c
 )
 
+# upstream's WANT_FLUIDSYNTH=1, the MIDI player on fluidlite, which the core
+# builds on every platform; its .sf3 samples decode with rvorbis instead of
+# libvorbis and libogg (library/core/enhancements/midi/vorbis.c)
+set(prboomtv_fluidlite_files
+    deps/fluidlite/src/fluid_chan.c
+    deps/fluidlite/src/fluid_chorus.c
+    deps/fluidlite/src/fluid_conv.c
+    deps/fluidlite/src/fluid_defsfont.c
+    deps/fluidlite/src/fluid_dsp_float.c
+    deps/fluidlite/src/fluid_gen.c
+    deps/fluidlite/src/fluid_hash.c
+    deps/fluidlite/src/fluid_list.c
+    deps/fluidlite/src/fluid_mod.c
+    deps/fluidlite/src/fluid_ramsfont.c
+    deps/fluidlite/src/fluid_rev.c
+    deps/fluidlite/src/fluid_settings.c
+    deps/fluidlite/src/fluid_synth.c
+    deps/fluidlite/src/fluid_sys.c
+    deps/fluidlite/src/fluid_tuning.c
+    deps/fluidlite/src/fluid_voice.c
+)
+list(APPEND prboomtv_upstream_files ${prboomtv_fluidlite_files})
+
 if (EMSCRIPTEN)
     # linked into RetroArch (dopo/cmake/retroarch.cmake), which brings
     # its own libretro-common, as upstream's STATIC_LINKING does; and no
@@ -367,9 +390,9 @@ target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/inc
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
     "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
     "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
-    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}")
+    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}" "${PRBOOM_DIR}/deps/fluidlite/include")
 target_compile_definitions(prboomtv_libretro PRIVATE
-    HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG
+    HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_LIBFLUIDSYNTH
     INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE
     DOPO_VERSION_MAJOR=${PRBOOMTV_VERSION_MAJOR} DOPO_VERSION_PATCH=${PRBOOMTV_VERSION_PATCH})
 target_compile_options(prboomtv_libretro PRIVATE -Wall -W -Wno-unused-parameter -fomit-frame-pointer)
