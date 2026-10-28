@@ -465,6 +465,25 @@ if (EMSCRIPTEN)
         "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
     list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
 
+    # the index's Music tab: upstream's OPL player alone, which renders a
+    # song of the game's WAD for the page (library/music/opl.c)
+    add_executable(prboomtv_music
+        "${PRBOOMTV_DIR}/library/music/opl.c"
+        "${PRBOOM_DIR}/src/opl.c"
+        "${PRBOOM_DIR}/src/dbopl.c"
+        "${PRBOOM_DIR}/src/opl_queue.c"
+        "${PRBOOM_DIR}/src/midifile.c"
+        "${PRBOOM_DIR}/src/mus2mid.c"
+        "${PRBOOM_DIR}/src/memio.c")
+    target_include_directories(prboomtv_music SYSTEM PRIVATE
+        "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro/libretro-common/include")
+    target_compile_definitions(prboomtv_music PRIVATE INLINE=inline _DEFAULT_SOURCE)
+    set_target_properties(prboomtv_music PROPERTIES
+        C_STANDARD 99
+        C_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${prboomtv_www}"
+        LINK_FLAGS "-sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=PrBoomTVMusic -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=_malloc,_free")
+
     # offline, the copy of the last configure stands in
     set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")
     file(DOWNLOAD "${PRBOOMTV_GAMES_URL}" "${prboomtv_games_source}.part" STATUS prboomtv_games_status TLS_VERIFY ON)

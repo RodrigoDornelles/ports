@@ -12,7 +12,7 @@
 ## its own to install: its scope is the page alone, so every game installs
 ## apart from the others in the same folder; the manifest has the values as
 ## JSON strings too, {{{title_json}}}. The index's list goes to
-## <output>/games.json: id, title, banner URL and the flags. Outputs are
+## <output>/games.json: id, title, playlist and banner URLs and the flags. Outputs are
 ## only rewritten on change.
 
 import std/[json, os, parseopt, strutils]
@@ -92,7 +92,7 @@ proc main() =
     var modes = newJArray()
     for mode in game{"modes"}.getElems:
       modes.add newJString(mode.getStr)
-    index.add %*{"id": id, "title": title, "banner": banner,
+    index.add %*{"id": id, "title": title, "content": base & game["url"].getStr, "banner": banner,
                  "demo": game{"demo"}.getBool, "y90": game{"y90"}.getBool,
                  "modes": modes}
 

@@ -11,6 +11,7 @@
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tab-play" aria-controls="launch" aria-selected="true">Play</button>
       <button type="button" role="tab" id="tab-download" aria-controls="pack" aria-selected="false">Download</button>
+      <button type="button" role="tab" id="tab-music" aria-controls="music" aria-selected="false">Music</button>
     </div>
 
     <form id="launch" role="tabpanel" aria-labelledby="tab-play">
@@ -111,6 +112,28 @@
         <legend class="sr-only">Games in the package</legend>
       </fieldset>
     </form>
+
+    <form id="music" role="tabpanel" aria-labelledby="tab-music" hidden>
+      <div class="bar">
+        <label class="field grow short">
+          <span>Game</span>
+          <select id="music-game" name="game"></select>
+        </label>
+        <label class="field grow short">
+          <span>Song</span>
+          <select id="music-song" name="song" disabled></select>
+        </label>
+        <label class="field wide">
+          <span>Synth</span>
+          <select id="music-synth" name="synth">
+            <option value="opl">Original (OPL)</option>
+          </select>
+        </label>
+        <button type="submit" class="go" id="music-play" disabled>Play</button>
+        <button type="button" class="go" id="music-download" disabled>Download</button>
+      </div>
+      <p class="status" id="music-status" role="status"></p>
+    </form>
   </main>
 
   <script type="module">
@@ -135,17 +158,21 @@
       }
     }
 
-    /* the tabs: Play, and Download, which #download opens */
-    const tabs = { play: document.getElementById('tab-play'), download: document.getElementById('tab-download') };
+    /* the tabs: Play, and Download and Music, which #download and #music open */
+    const tabs = {
+      play: document.getElementById('tab-play'),
+      download: document.getElementById('tab-download'),
+      music: document.getElementById('tab-music'),
+    };
     function showTab(name) {
       for (const [key, tab] of Object.entries(tabs)) {
         tab.setAttribute('aria-selected', String(key === name));
         document.getElementById(tab.getAttribute('aria-controls')).hidden = key !== name;
       }
     }
-    tabs.play.addEventListener('click', () => { showTab('play'); history.replaceState(null, '', '#'); });
-    tabs.download.addEventListener('click', () => { showTab('download'); history.replaceState(null, '', '#download'); });
-    if (location.hash === '#download') showTab('download');
+    for (const [key, tab] of Object.entries(tabs))
+      tab.addEventListener('click', () => { showTab(key); history.replaceState(null, '', key === 'play' ? '#' : `#${key}`); });
+    if (location.hash.slice(1) in tabs) showTab(location.hash.slice(1));
 
     function card(game, type, name, checked) {
       const card = document.createElement('label');
@@ -259,6 +286,254 @@
       status.classList.add('error');
     });
     syncPack();
+
+    /* the music: the songs of a game's WADs, MUS or MIDI rendered whole by
+     * upstream's OPL player (prboomtv_music.js) with the game's GENMIDI,
+     * Ogg and MP3 decoded by the browser; played, paused and saved as WAV */
+    const music = document.getElementById('music');
+    const musicGame = document.getElementById('music-game');
+    const musicSong = document.getElementById('music-song');
+    const musicSynth = document.getElementById('music-synth');
+    const musicPlay = document.getElementById('music-play');
+    const musicDownload = document.getElementById('music-download');
+    const RATE = 44100;
+    const songLists = new Map();
+    let synth = null;
+    let synthLump = null;
+    let rendered = null;
+    let audio = null;
+    let source = null;
+    let startedAt = 0;
+    let offset = 0;
+
+    function say(text, error = false) {
+      const status = document.getElementById('music-status');
+      status.textContent = text;
+      status.classList.toggle('error', error);
+    }
+    const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const starts = (data, magic) => [...magic].every((c, i) => data[i] === c.charCodeAt(0));
+    const isMidi = (data) => starts(data, 'MUS\x1a') || starts(data, 'MThd');
+    const isAudio = (data) => starts(data, 'OggS') || starts(data, 'ID3');
+
+    /* the lumps of a WAD, [name, data] in its order */
+    function* lumps(wad) {
+      const view = new DataView(wad.buffer, wad.byteOffset, wad.byteLength);
+      if (wad.length < 12 || !(starts(wad, 'IWAD') || starts(wad, 'PWAD'))) return;
+      const count = view.getInt32(4, true);
+      const dir = view.getInt32(8, true);
+      for (let i = 0; i < count && dir + i * 16 + 16 <= wad.length; i++) {
+        const at = view.getInt32(dir + i * 16, true);
+        const size = view.getInt32(dir + i * 16 + 4, true);
+        const name = new TextDecoder().decode(wad.subarray(dir + i * 16 + 8, dir + i * 16 + 16)).replace(/\0.*$/s, '').toUpperCase();
+        if (at >= 0 && size > 0 && at + size <= wad.length) yield [name, wad.subarray(at, at + size)];
+      }
+    }
+
+    /* the songs and the GENMIDI of the WADs in the game's playlist, a later
+     * WAD's song replacing the one of the same name */
+    async function songsOf(id) {
+      const game = games.find((g) => g.id === id);
+      const url = new URL(game.content, location.href);
+      const lines = (await (await fetch(url)).text()).split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => /\.wad(\.gz)?$/i.test(line));
+      const wads = await Promise.all(lines.map(async (line) => {
+        const response = await fetch(new URL(line, url));
+        if (!response.ok) throw new Error(`${line}: ${response.status} ${response.statusText}`);
+        let data = new Uint8Array(await response.arrayBuffer());
+        if (data[0] === 0x1f && data[1] === 0x8b)
+          data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+        return data;
+      }));
+      const songs = new Map();
+      let genmidi = null;
+      for (const wad of wads) {
+        for (const [name, data] of lumps(wad)) {
+          if (name === 'GENMIDI') genmidi = data;
+          else if (isMidi(data) || isAudio(data)) songs.set(name, data);
+        }
+      }
+      return { songs, genmidi };
+    }
+    const songList = (id) => {
+      if (!songLists.has(id)) songLists.set(id, songsOf(id).catch((e) => { songLists.delete(id); throw e; }));
+      return songLists.get(id);
+    };
+
+    /* the OPL player, made once and given the instruments of the game */
+    async function opl(genmidi) {
+      synth ??= import('./prboomtv_music.js').then((module) => module.default());
+      const m = await synth;
+      if (synthLump?.data !== genmidi) {
+        const lump = m._malloc(genmidi.length);
+        m.HEAPU8.set(genmidi, lump);
+        const ready = m._music_init(RATE, lump);
+        if (synthLump) m._free(synthLump.at);
+        synthLump = { data: genmidi, at: lump };
+        if (!ready) throw new Error('the OPL player did not start');
+      }
+      return m;
+    }
+
+    /* the song of the form as an AudioBuffer, kept for the next play */
+    async function render() {
+      const key = `${musicSynth.value}:${musicGame.value}:${musicSong.value}`;
+      if (rendered?.key === key) return rendered.buffer;
+      const { songs, genmidi } = await songList(musicGame.value);
+      const data = songs.get(musicSong.value);
+      let buffer;
+      if (isAudio(data)) {
+        buffer = await new OfflineAudioContext(2, 1, RATE).decodeAudioData(data.slice().buffer);
+      } else {
+        if (!genmidi) throw new Error('the game has no OPL instruments (GENMIDI)');
+        const m = await opl(genmidi);
+        const song = m._malloc(data.length);
+        const out = m._malloc(4);
+        m.HEAPU8.set(data, song);
+        const pcm = m._music_render(song, data.length, RATE, out);
+        const frames = m.HEAP32[out >> 2];
+        m._free(song);
+        m._free(out);
+        if (!pcm || !frames) throw new Error(`${musicSong.value} is not a song the OPL player plays`);
+        const interleaved = m.HEAPF32.subarray(pcm >> 2, (pcm >> 2) + frames * 2);
+        buffer = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate: RATE });
+        const left = buffer.getChannelData(0);
+        const right = buffer.getChannelData(1);
+        for (let i = 0; i < frames; i++) {
+          left[i] = interleaved[i * 2];
+          right[i] = interleaved[i * 2 + 1];
+        }
+        m._free(pcm);
+      }
+      rendered = { key, buffer };
+      return buffer;
+    }
+
+    /* 16-bit PCM */
+    function wav(buffer) {
+      const channels = buffer.numberOfChannels;
+      const bytes = buffer.length * channels * 2;
+      const view = new DataView(new ArrayBuffer(44 + bytes));
+      const text = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+      text(0, 'RIFF');
+      view.setUint32(4, 36 + bytes, true);
+      text(8, 'WAVE');
+      text(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, buffer.sampleRate, true);
+      view.setUint32(28, buffer.sampleRate * channels * 2, true);
+      view.setUint16(32, channels * 2, true);
+      view.setUint16(34, 16, true);
+      text(36, 'data');
+      view.setUint32(40, bytes, true);
+      const planes = Array.from({ length: channels }, (_, c) => buffer.getChannelData(c));
+      let at = 44;
+      for (let i = 0; i < buffer.length; i++) {
+        for (const plane of planes) {
+          const sample = Math.max(-1, Math.min(1, plane[i]));
+          view.setInt16(at, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+          at += 2;
+        }
+      }
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    /* the buttons wait for the job; a failure lands in the status */
+    async function busy(text, job) {
+      musicPlay.disabled = musicDownload.disabled = true;
+      say(text);
+      try {
+        return await job();
+      } catch (e) {
+        console.warn('[prboomtv] music:', e);
+        say(`Could not play it: ${e.message ?? e}`, true);
+        return null;
+      } finally {
+        musicPlay.disabled = musicDownload.disabled = !musicSong.value;
+      }
+    }
+
+    function stop() {
+      if (source) {
+        source.onended = null;
+        source.stop();
+        source = null;
+      }
+      musicPlay.textContent = 'Play';
+    }
+
+    function reset() {
+      stop();
+      offset = 0;
+    }
+
+    let shown = null;
+    async function showSongs() {
+      const id = musicGame.value;
+      if (shown === id) return;
+      shown = id;
+      reset();
+      musicSong.replaceChildren();
+      musicSong.disabled = true;
+      const list = await busy(`Loading the songs of ${musicGame.selectedOptions[0].text}...`, () => songList(id));
+      if (!list || musicGame.value !== id) {
+        if (!list) shown = null;
+        return;
+      }
+      for (const name of list.songs.keys()) musicSong.append(new Option(name, name));
+      musicSong.disabled = !list.songs.size;
+      musicPlay.disabled = musicDownload.disabled = !list.songs.size;
+      say(list.songs.size ? plural(list.songs.size, 'song', 'songs') : 'No songs in this game.');
+    }
+
+    for (const game of games) musicGame.append(new Option(game.title, game.id));
+    musicGame.addEventListener('change', showSongs);
+    musicSong.addEventListener('change', reset);
+    musicSynth.addEventListener('change', reset);
+    tabs.music.addEventListener('click', showSongs);
+    if (!music.hidden) showSongs();
+
+    music.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (source) {
+        offset += audio.currentTime - startedAt;
+        stop();
+        say(`Paused at ${clock(offset)}`);
+        return;
+      }
+      /* made in the click, which lets it sound */
+      audio ??= new AudioContext();
+      audio.resume();
+      const buffer = await busy(`Rendering ${musicSong.value}...`, render);
+      if (!buffer || source) return;
+      if (offset >= buffer.duration) offset = 0;
+      source = new AudioBufferSourceNode(audio, { buffer });
+      source.connect(audio.destination);
+      source.onended = () => {
+        source = null;
+        offset = 0;
+        musicPlay.textContent = 'Play';
+        say(`${musicSong.value}, ${clock(buffer.duration)}`);
+      };
+      startedAt = audio.currentTime;
+      source.start(0, offset);
+      musicPlay.textContent = 'Pause';
+      say(`Playing ${musicSong.value}, ${clock(buffer.duration)}`);
+    });
+
+    musicDownload.addEventListener('click', async () => {
+      const buffer = await busy(`Rendering ${musicSong.value}...`, render);
+      if (!buffer) return;
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(wav(buffer));
+      link.download = `${musicGame.value}_${musicSong.value}.wav`.toLowerCase();
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      say(source ? `Playing ${musicSong.value}, ${clock(buffer.duration)}` : `Saved ${link.download}`);
+    });
 
     const online = document.getElementById('online');
     const onlineText = document.getElementById('online-text');
