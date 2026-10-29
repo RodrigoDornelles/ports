@@ -49,6 +49,22 @@ char *I_FindSoundfont(void)
   }
 /* @endpatch */
 
+/**
+ * @brief A soundfont that does not load (truncated, not a SoundFont) is no
+ * soundfont: fluidlite kept the half-made font in the synth's list, over a
+ * freed bank, and returned its id as a success, so the first note crashed.
+ *
+ * @patch deps/fluidlite/src/fluid_synth.c 2532-2532
+ */
+    if (fluid_sfloader_load(loader, filename) == NULL) {
+      loader->data = NULL;
+      synth->sfont = fluid_list_remove(synth->sfont, sfont);
+      FLUID_FREE(sfont);
+      synth->sfont_id--;
+      continue;
+    }
+/* @endpatch */
+
 /** @patch src/flplayer.c 191-191 */
     log_cb (RETRO_LOG_INFO, "fl_init: no soundfont, MIDI stays on the OPL\n");
 /* @endpatch */
