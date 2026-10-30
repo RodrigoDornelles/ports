@@ -47,7 +47,9 @@ function setConfig(text, values) {
   return lines.filter((l) => l.trim()).join('\n') + '\n';
 }
 
-async function fetchContent(url, progress) {
+/** The bytes at url, progress(loaded, total) as they come; total is 0
+ * when the server does not say. */
+export async function fetchContent(url, progress) {
   const response = await fetch(url);
   if (!response.ok)
     throw new Error(`${url}: HTTP ${response.status}`);
