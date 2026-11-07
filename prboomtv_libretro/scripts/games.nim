@@ -1,13 +1,14 @@
 ## games: the web build's game pages, from a published games.json.
 ##
 ## usage: games --games <games.json> --url <its url> --template <game.html>
-##              --manifest <game.webmanifest> --output <dir>
+##              --manifest <game.webmanifest> --output <dir> [--midi <midi.json url>]
 ##
 ## Every game of --games ({"title", "url", "banner", "demo", "y90", "modes"},
 ## url and banner relative to the games.json, published at --url) gets
 ## <output>/<id>.html, the mustache --template with {{id}}, {{title}},
 ## {{content}} (the playlist's URL) and {{banner}} (the banner's URL); the id
-## is the playlist's name (doom1.m3u: doom1.html). Each page also gets
+## is the playlist's name (doom1.m3u: doom1.html), and {{midi}}, the URL of
+## the midi.json whose SoundFonts the page may add to the playlist. Each page also gets
 ## <output>/<id>.webmanifest from --manifest, which makes the game an app of
 ## its own to install: its scope is the page alone, so every game installs
 ## apart from the others in the same folder; the manifest has the values as
@@ -35,10 +36,10 @@ proc gameId(url: string): string =
     fail "url '" & url & "' is not a playlist file name next to games.json"
   name
 
-const usage = "usage: games --games <games.json> --url <its url> --template <game.html> --manifest <game.webmanifest> --output <dir>"
+const usage = "usage: games --games <games.json> --url <its url> --template <game.html> --manifest <game.webmanifest> --output <dir> [--midi <midi.json url>]"
 
 proc main() =
-  var gamesPath, url, templatePath, manifestPath, output: string
+  var gamesPath, url, templatePath, manifestPath, output, midi: string
   # with a longNoVal, the other options take the next argument as value
   for kind, key, value in getopt(longNoVal = @["help"]):
     if kind != cmdLongOption: fail "unexpected argument '" & key & "'"
@@ -48,6 +49,7 @@ proc main() =
     of "template": templatePath = value
     of "manifest": manifestPath = value
     of "output": output = value
+    of "midi": midi = value
     of "help":
       echo usage
       quit QuitSuccess
@@ -83,6 +85,7 @@ proc main() =
     values["title"] = title
     values["content"] = base & game["url"].getStr
     values["banner"] = banner
+    values["midi"] = midi
     values["title_json"] = $(%title)
     values["description_json"] = $(%description)
     values["banner_json"] = $(%banner)

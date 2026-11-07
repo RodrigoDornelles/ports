@@ -31,11 +31,12 @@
           <label><input type="radio" name="prboom-widescreen" value="enabled"><span>16:9</span></label>
           <label><input type="radio" name="prboom-widescreen" value="disabled"><span>4:3</span></label>
         </fieldset>
-        <fieldset class="field segmented">
-          <legend>Frame rate</legend>
-          <label><input type="radio" name="prboom-frameskip" value="0"><span>60 fps</span></label>
-          <label><input type="radio" name="prboom-frameskip" value="1"><span>30 fps</span></label>
-        </fieldset>
+        <label class="field wide">
+          <span>Music</span>
+          <select id="play-music" name="music">
+            <option value="">Original (OPL)</option>
+          </select>
+        </label>
         <button type="submit" class="go">Play</button>
       </div>
       <details class="graphics">
@@ -43,7 +44,7 @@
         <div class="options">
 {{> graphics}}
         </div>
-        <p class="hint">4:3 shows the classic picture with borders on the sides. Lights, glow and smoothing need OpenGL.</p>
+        <p class="hint">4:3 shows the classic picture with borders on the sides. Lights, glow and smoothing need OpenGL. A SoundFont in Music downloads with the game.</p>
       </details>
 
       <fieldset class="games" id="games">
@@ -95,13 +96,6 @@
               <option value="disabled">4:3</option>
             </select>
           </label>
-          <label class="field">
-            <span>Frame rate</span>
-            <select name="prboom-frameskip">
-              <option value="0">60 fps</option>
-              <option value="1">30 fps</option>
-            </select>
-          </label>
 {{> graphics}}
         </div>
       </section>
@@ -146,6 +140,22 @@
     const packList = document.getElementById('pack-games');
     const nick = document.getElementById('nick');
     const KEY = 'prboomtv.launch';
+
+    /* the SoundFonts of midi.json, their url made absolute (relative to
+     * it): the Music field plays the game on one, the Music tab a song */
+    const bankList = (async () => {
+      const url = document.getElementById('music-synth').dataset.banks;
+      if (!url) return [];
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return (await response.json())
+        .filter((bank) => bank?.title && bank?.url)
+        .map((bank) => ({ ...bank, url: new URL(bank.url, response.url).href }));
+    })().catch((e) => {
+      console.warn('[prboomtv] midi.json:', e);
+      return [];
+    });
+    const credit = (bank) => [bank.title, bank.author && `by ${bank.author}`, bank.license && `(${bank.license})`].filter(Boolean).join(' ');
 
     const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; } };
     const store = () => { try { localStorage.setItem(KEY, JSON.stringify(Object.fromEntries(new FormData(form)))); } catch {} };
@@ -238,6 +248,19 @@
     syncRender(form);
 
     form.addEventListener('change', () => { syncRender(form); store(); });
+
+    /* the Music field: the original OPL, or a bank by its file name, which
+     * the game page looks up in midi.json (game.html); the choice saved
+     * before the list came is put back once it is there */
+    const playMusic = document.getElementById('play-music');
+    bankList.then((list) => {
+      for (const bank of list) {
+        const option = new Option(bank.title, decodeURIComponent(new URL(bank.url).pathname.split('/').pop()));
+        option.title = credit(bank);
+        playMusic.append(option);
+      }
+      if (!playMusic.value) apply(form, { music: load().music ?? '' });
+    });
     nick.addEventListener('input', store);
 
     /* only what differs from defaults.txt, which the game page falls back to */
@@ -366,27 +389,22 @@
       return songLists.get(id);
     };
 
-    /* the SoundFonts of midi.json after the OPL, their url relative to it */
+    /* the SoundFonts of midi.json after the OPL */
     function listBanks() {
-      banksListed ??= (async () => {
-        if (!musicSynth.dataset.banks) return;
-        const response = await fetch(musicSynth.dataset.banks);
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        for (const bank of await response.json()) {
-          if (!bank?.title || !bank?.url) continue;
-          const url = new URL(bank.url, response.url).href;
-          banks.set(url, bank);
-          musicSynth.append(new Option(bank.title, url));
+      banksListed ??= bankList.then((list) => {
+        for (const bank of list) {
+          banks.set(bank.url, bank);
+          musicSynth.append(new Option(bank.title, bank.url));
         }
-      })().catch((e) => console.warn('[prboomtv] midi.json:', e));
+      });
       return banksListed;
     }
 
     function showCredit() {
-      const credit = document.getElementById('music-credit');
+      const note = document.getElementById('music-credit');
       const bank = banks.get(musicSynth.value);
-      credit.hidden = !bank;
-      if (bank) credit.textContent = [bank.title, bank.author && `by ${bank.author}`, bank.license && `(${bank.license})`].filter(Boolean).join(' ');
+      note.hidden = !bank;
+      if (bank) note.textContent = credit(bank);
     }
 
     const player = () => (synth ??= import('./prboomtv_music.js').then((module) => module.default()));

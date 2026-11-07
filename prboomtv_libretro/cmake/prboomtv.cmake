@@ -437,11 +437,13 @@ if (EMSCRIPTEN)
     set(PRBOOMTV_GAMES_URL
         "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/games.json"
         CACHE STRING "games.json of the web build; its url and banner fields are relative to it")
-    # the SoundFonts of the Music tab, fetched by the page: [{"title", "url",
-    # "author", "license"}], url relative to it; next to games.json
+    # the SoundFonts of the Music tab and of the Play tab's Music field (the
+    # game page adds the bank picked to the playlist), fetched by the pages:
+    # [{"title", "url", "author", "license"}], url relative to it; next to
+    # games.json
     string(REGEX REPLACE "/[^/]*$" "/midi.json" prboomtv_midi_default "${PRBOOMTV_GAMES_URL}")
     set(PRBOOMTV_MIDI_URL "${prboomtv_midi_default}"
-        CACHE STRING "midi.json of the web build, the SoundFonts the Music tab plays on")
+        CACHE STRING "midi.json of the web build, the SoundFonts the music plays on")
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
@@ -531,6 +533,7 @@ if (EMSCRIPTEN)
             --template "${PRBOOMTV_DIR}/www/game.html"
             --manifest "${PRBOOMTV_DIR}/www/game.webmanifest"
             --output "${prboomtv_www}"
+            --midi "${PRBOOMTV_MIDI_URL}"
         RESULT_VARIABLE prboomtv_games_result
         ERROR_VARIABLE prboomtv_games_error)
     if (prboomtv_games_result)

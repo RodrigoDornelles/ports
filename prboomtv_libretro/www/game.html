@@ -11,6 +11,7 @@
   <meta property="og:image" content="{{banner}}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="prboomtv:content" content="{{content}}">
+  <meta name="prboomtv:midi" content="{{midi}}">
   <link rel="manifest" href="{{id}}.webmanifest">
   <meta name="theme-color" content="#000000">
   <meta name="mobile-web-app-capable" content="yes">
@@ -52,12 +53,34 @@
       return {};
     });
 
+    /* #music=<file> plays the MIDI on that SoundFont of midi.json, the
+     * index's Music field: the bank joins the game's playlist and the core
+     * takes it from there; without it, the original OPL */
+    async function soundfont(file) {
+      const midi = document.querySelector('meta[name="prboomtv:midi"]').content;
+      if (!file || !midi) return [];
+      try {
+        const response = await fetch(midi);
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        for (const bank of await response.json()) {
+          if (!bank?.url) continue;
+          const url = new URL(bank.url, response.url);
+          if (decodeURIComponent(url.pathname.split('/').pop()) === file) return [url.href];
+        }
+        throw new Error(`no ${file} in it`);
+      } catch (e) {
+        console.warn('[prboomtv] midi.json:', e);
+        return [];
+      }
+    }
+
     /* the sound starts with the first key or click: browsers hold audio
      * back until the page is interacted with */
     play({
       canvas: document.getElementById('canvas'),
       core: 'prboomtv_libretro.js',
       content,
+      playlist: await soundfont(hashParams().get('music')),
       options: { ...defaults, ...coreOptions() },
       nick: hashParams().get('nick') || '',
       progress: (loaded, total) => {

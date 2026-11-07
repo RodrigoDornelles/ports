@@ -95,30 +95,45 @@ function contentPath(line) {
  * The files of the content, as [{ path, data }], the content first: an
  * m3u playlist with every file it lists, fetched relative to it and kept
  * at the same relative paths, so the core resolves the playlist as on
- * disk; any other content alone.
+ * disk; any other content alone. The URLs of more go next to the content
+ * under their own names and, in a playlist, are listed at its end.
  */
-async function fetchFiles(content, progress) {
+async function fetchFiles(content, more, progress) {
   const url = new URL(content, location.href);
   const name = decodeURIComponent(url.pathname.split('/').pop());
-  if (!/\.m3u$/i.test(name))
-    return [{ path: name, data: await fetchContent(url, progress) }];
+  const m3u = /\.m3u$/i.test(name);
+  const entries = [];
+  let playlist = null;
+  if (m3u) {
+    playlist = new TextDecoder().decode(await fetchContent(url));
+    for (const line of playlist.split(/\r?\n/).map((l) => l.trim()))
+      if (line && !line.startsWith('#'))
+        entries.push({ path: contentPath(line), url: new URL(line, url) });
+  } else {
+    entries.push({ path: name, url });
+  }
+  for (const extra of more) {
+    const at = new URL(extra, location.href);
+    const path = contentPath(decodeURIComponent(at.pathname.split('/').pop()));
+    if (entries.some((entry) => entry.path === path))
+      throw new Error(`${path}: already in the content`);
+    entries.push({ path, url: at });
+    if (m3u) playlist = playlist.replace(/\s*$/, '\n') + path + '\n';
+  }
 
-  const playlist = await fetchContent(url);
-  const lines = new TextDecoder().decode(playlist).split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
   const loaded = new Map();
   const totals = new Map();
   const sum = (map) => [...map.values()].reduce((a, b) => a + b, 0);
-  const files = await Promise.all(lines.map(async (line) => ({
-    path: contentPath(line),
-    data: await fetchContent(new URL(line, url), (done, total) => {
-      loaded.set(line, done);
-      totals.set(line, total);
+  const files = await Promise.all(entries.map(async ({ path, url }) => ({
+    path,
+    data: await fetchContent(url, (done, total) => {
+      loaded.set(path, done);
+      totals.set(path, total);
       progress?.(sum(loaded), sum(totals));
     }),
   })));
-  return [{ path: name, data: playlist }, ...files];
+  if (!m3u) return files;
+  return [{ path: name, data: new TextEncoder().encode(playlist) }, ...files];
 }
 
 /** TURN servers from url, [] when there are none. */
@@ -146,6 +161,8 @@ function sync(FS, populate) {
  * core:     URL of <core>_libretro.js
  * content:  URL of the content, written under its own file name; an m3u
  *           playlist brings the files it lists, at their relative paths
+ * playlist: URLs of more files, written next to the content under their
+ *           own names and added to the end of an m3u content (optional)
  * nick:     netplay nickname
  * config:   more retroarch.cfg values
  * options:  core options, { 'prboom-glow': '1' } (default: the ones in
@@ -154,11 +171,11 @@ function sync(FS, populate) {
  *           (optional; without it, STUN only)
  * progress: (loaded, total) while the content downloads
  */
-export async function play({ canvas, core, content, nick, config = {}, options = coreOptions(),
-                            turn, progress }) {
+export async function play({ canvas, core, content, playlist = [], nick, config = {},
+                            options = coreOptions(), turn, progress }) {
   const coreUrl = new URL(core, location.href);
   const [files, { default: factory }, trystero, iceServers] = await Promise.all([
-    fetchFiles(content, progress),
+    fetchFiles(content, playlist, progress),
     import(coreUrl.href),
     import(TRYSTERO),
     turn ? turnServers(turn) : [],
