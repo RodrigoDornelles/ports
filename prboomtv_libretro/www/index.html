@@ -629,17 +629,14 @@
 
     const online = document.getElementById('online');
     const onlineText = document.getElementById('online-text');
-    let rooms = [];
-    /* peers take a few seconds to meet: "none" only after a while */
-    let settled = false;
+    let rooms = null;
     const show = () => {
-      const players = rooms.reduce((sum, room) => sum + room.players, 0);
+      const players = (rooms ?? []).reduce((sum, room) => sum + room.players, 0);
       online.classList.toggle('live', players > 0);
       onlineText.textContent = players
         ? `${plural(players, 'player', 'players')} online in ${plural(rooms.length, 'room', 'rooms')}`
-        : settled ? 'No rooms open right now' : 'Looking for rooms...';
+        : rooms ? 'No rooms open right now' : 'Looking for rooms...';
     };
-    setTimeout(() => { settled = true; show(); }, 12000);
     watchLobby('prboomtv', (heard) => { rooms = heard; show(); })
       .catch((e) => {
         console.warn('[prboomtv] lobby:', e);

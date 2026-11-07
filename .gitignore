@@ -2,3 +2,8 @@ build*/
 vendor/
 *.db
 .DS_Store
+*-lock.json
+node_modules/
+.temp/
+.branches/
+.env

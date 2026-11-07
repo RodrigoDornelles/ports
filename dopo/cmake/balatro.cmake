@@ -55,8 +55,13 @@ dopo_www_page("${balatro_www}/index.html" "${DOPO_DIR}/www/balatro.html"
     "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/balatro/320x200.png")
 list(APPEND balatro_outputs "${balatro_www}/index.html")
 
+# JSZip, which opens the player's Balatro.exe, from node_modules (npm.cmake)
+include("${DOPO_DIR}/cmake/npm.cmake")
+dopo_npm_file(balatro_jszip "jszip/dist/jszip.min.js")
+
 set(balatro_copies
     "${DOPO_DIR}/www/balatro.js" balatro.js
+    "${balatro_jszip}" jszip.min.js
     "${DOPO_DIR}/assets/balatro/320x200.png" banner.png
     "${DOPO_DIR}/assets/balatro/1280x800.png" screenshot.png
     "${DOPO_DIR}/assets/balatro/192x192.png" icon-192x192.png

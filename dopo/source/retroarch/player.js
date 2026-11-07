@@ -4,19 +4,27 @@
  *
  * userdata/ (config, saves, states) lives in IndexedDB, so it outlasts the
  * page; the content does not, it is fetched every time. Netplay is WebRTC
- * between browsers through Trystero (peer.js, rooms.js):
- * STUN from Google and Cloudflare, and TURN when the page passes a URL
- * that hands some out. Any static server serves the dist folder.
+ * between browsers (peer.js): the rooms are listed by the lobby of a
+ * Supabase project, which answers as the libretro lobby does (rooms.js,
+ * dopo/supabase), and the players meet on its Realtime (signal.js); STUN
+ * from Google and Cloudflare, and TURN when the page passes a URL that
+ * hands some out. Any static server serves the dist folder.
  */
-
-/* Nostr: an announce reaches everyone on its topic at once (BitTorrent
- * trackers hand it to a few peers at random, and most public ones are down) */
-const TRYSTERO = 'https://esm.sh/@trystero-p2p/nostr@0.25.4';
 
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 
-/* every core's rooms live under this Trystero app (peer.js, rooms.js) */
-const APP_ID = 'dopo';
+/* dopo/supabase/lobby.json, copied next to this file by the build */
+const LOBBY = new URL('lobby.json', import.meta.url);
+
+let lobbyProject = null;
+/** The lobby's project, { url, key }, or null without one (no netplay). */
+export function lobbyConfig() {
+  lobbyProject ??= fetch(LOBBY).then((response) => response.ok ? response.json() : null)
+    .then((lobby) => (lobby?.project && lobby?.key
+      ? { url: `https://${lobby.project}.supabase.co`, key: lobby.key } : null))
+    .catch(() => null);
+  return lobbyProject;
+}
 
 const HOME = '/home/web_user/retroarch';
 const USERDATA = `${HOME}/userdata`;
@@ -174,12 +182,13 @@ function sync(FS, populate) {
 export async function play({ canvas, core, content, playlist = [], nick, config = {},
                             options = coreOptions(), turn, progress }) {
   const coreUrl = new URL(core, location.href);
-  const [files, { default: factory }, trystero, iceServers] = await Promise.all([
+  const [files, { default: factory }, lobby, iceServers] = await Promise.all([
     fetchFiles(content, playlist, progress),
     import(coreUrl.href),
-    import(TRYSTERO),
+    lobbyConfig(),
     turn ? turnServers(turn) : [],
   ]);
+  if (!lobby) console.warn('[player] no lobby.json: netplay has no lobby');
 
   const module = await factory({
     canvas,
@@ -187,10 +196,7 @@ export async function play({ canvas, core, content, playlist = [], nick, config 
     print: (text) => console.log(text),
     printErr: (text) => console.warn(text),
     dopo: {
-      trystero: { joinRoom: trystero.joinRoom, selfId: trystero.selfId },
-      appId: APP_ID,
-      /* the lobby room: rooms of this core only */
-      core: coreUrl.pathname.split('/').pop().replace(/_libretro\.js$/, ''),
+      lobby,
       rtc: { iceServers: [...STUN, ...iceServers] },
     },
   });
@@ -235,42 +241,42 @@ export async function play({ canvas, core, content, playlist = [], nick, config 
 }
 
 /**
- * Listens to the rooms the hosts of a core announce in its lobby
- * (rooms.js), without hosting or joining any: a page
- * outside the game can show who is playing. onChange gets the open
- * rooms, [{ peer, game, players }] (game: the content's name, doom1 for
- * doom1.m3u), on every change and as rooms go stale. Returns a function
- * that leaves the lobby.
+ * The rooms of a core in the lobby (rooms.js), asked again every few
+ * seconds, without hosting or joining any: a page outside the game can
+ * show who is playing. core is the core_name hosts announce (any case:
+ * prboomtv for PrBoomTV). onChange gets the open rooms, [{ peer, game,
+ * players }] (game: the content's name, doom1 for doom1.m3u), each time
+ * the list comes. Returns a function that stops asking; throws when the
+ * build has no lobby.
  */
 export async function watchLobby(core, onChange) {
-  const STALE = 30000; /* rooms.js: a host repeats its room every 10 s */
-  const { joinRoom } = await import(TRYSTERO);
-  const lobby = joinRoom({ appId: APP_ID, rtcConfig: { iceServers: STUN } }, `lobby-${core}`);
-  const net = lobby.makeAction('room');
-  const rooms = new Map();
-  const report = () => {
-    const now = Date.now();
-    for (const [peer, room] of rooms)
-      if (now - room.seen > STALE) rooms.delete(peer);
-    onChange([...rooms].map(([peer, { fields }]) => ({
-      peer,
-      game: String(fields.game_name ?? '').split(/[\\/]/).pop(),
-      players: Math.max(1, Number(fields.player_count) || 1),
-    })));
+  const EVERY = 10000;
+  const lobby = await lobbyConfig();
+  if (!lobby) throw new Error('no lobby.json');
+  const url = `${lobby.url.replace(/\/+$/, '')}/functions/v1/lobby/list`;
+  let timer = 0;
+  let stopped = false;
+  const ask = async () => {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`lobby: list answered ${response.status}`);
+      const rooms = (await response.json())
+        .map((room) => room?.fields ?? {})
+        .filter((fields) => String(fields.core_name ?? '').toLowerCase() === core.toLowerCase());
+      if (!stopped) onChange(rooms.map((fields) => ({
+        peer: String(fields.ip ?? ''),
+        game: String(fields.game_name ?? '').split(/[\\/]/).pop(),
+        players: Math.max(1, Number(fields.player_count) || 1),
+      })));
+    } catch (e) {
+      console.warn('[player]', e.message ?? e);
+    }
+    if (!stopped) timer = setTimeout(ask, EVERY);
   };
-  net.onMessage = (fields, meta) => {
-    if (fields && typeof fields === 'object') rooms.set(meta.peerId, { fields, seen: Date.now() });
-    else rooms.delete(meta.peerId);
-    report();
-  };
-  lobby.onPeerLeave = (peer) => {
-    if (rooms.delete(peer)) report();
-  };
-  const timer = setInterval(report, 5000);
-  report();
+  await ask();
   return () => {
-    clearInterval(timer);
-    lobby.leave();
+    stopped = true;
+    clearTimeout(timer);
   };
 }
 
