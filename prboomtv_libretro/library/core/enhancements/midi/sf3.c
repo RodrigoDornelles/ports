@@ -1,17 +1,61 @@
 /**
- * @brief The SoundFont the MIDI music plays on: doom1.wad (or doom1.wad.gz,
- * or doom1.m3u) plays on a doom1.sf3 or doom1.sf2 next to it, any game on
- * a soundfont.sf3 or soundfont.sf2, the same places I_FindFile looks for a
- * wad: the content's folder, then system/prboom, then system. Upstream
- * looked for a path of its author's machine only.
+ * @brief The SoundFont the MIDI music plays on: the one an m3u playlist
+ * lists, else doom1.wad (or doom1.wad.gz, or doom1.m3u) plays on a
+ * doom1.sf3 or doom1.sf2 next to it, any game on a soundfont.sf3 or
+ * soundfont.sf2, the same places I_FindFile looks for a wad: the content's
+ * folder, then system/prboom, then system. Upstream looked for a path of
+ * its author's machine only.
  *
  * With a soundfont found, the default MIDI player (Adlib) plays on it; with
  * none, the OPL goes on as before.
  */
 
 /**
+ * @brief A SoundFont in an m3u playlist (a RIFF file of form sfbk, .sf2 or
+ * .sf3, whatever its name) is the one the music plays on; upstream skipped
+ * the line as no wad. The web player lists the bank picked on its page.
+ *
+ * @patch libretro/libretro.c 2273
+ */
+static char m3u_soundfont[PATH_MAX + 1];
+
+static int is_soundfont(const char *path)
+{
+   unsigned char head[12];
+   int64_t got;
+   RFILE *fp = filestream_open(path, RETRO_VFS_FILE_ACCESS_READ,
+         RETRO_VFS_FILE_ACCESS_HINT_NONE);
+
+   if (!fp)
+      return 0;
+   got = filestream_read(fp, head, sizeof(head));
+   filestream_close(fp);
+   return got == (int64_t)sizeof(head) && !memcmp(head, "RIFF", 4)
+       && !memcmp(head + 8, "sfbk", 4);
+}
+/* @endpatch */
+
+/** @patch libretro/libretro.c 2333 */
+      if (is_soundfont(resolved))
+      {
+         strlcpy(m3u_soundfont, resolved, sizeof(m3u_soundfont));
+         if (log_cb)
+            log_cb(RETRO_LOG_INFO, "m3u: soundfont '%s'\n", resolved);
+         continue;
+      }
+/* @endpatch */
+
+/** @brief Each content starts with no playlist soundfont.
+ *
+ * @patch libretro/libretro.c 2404
+ */
+      m3u_soundfont[0] = '\0';
+/* @endpatch */
+
+/**
  * @brief I_FindSoundfont: the path of the soundfont to load (malloc'd, the
- * caller frees it) or NULL; .sf3 before .sf2 of each name.
+ * caller frees it) or NULL: the playlist's, then .sf3 before .sf2 of each
+ * name.
  *
  * @patch libretro/libretro.c 4235
  */
@@ -23,6 +67,8 @@ char *I_FindSoundfont(void)
    char *p;
    int i, j;
 
+   if (m3u_soundfont[0])
+      return strdup(m3u_soundfont);
    remove_extension(name, g_basename, sizeof(name));
    names[0] = name;
    names[1] = "soundfont";
