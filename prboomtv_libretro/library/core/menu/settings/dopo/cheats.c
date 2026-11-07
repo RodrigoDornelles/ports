@@ -70,6 +70,17 @@ static void dopo_toggle_cheat_damage(int choice)
   }
 }
 
+static void dopo_toggle_cheat_doors(int choice)
+{
+  dopo_cheats_t c;
+
+  if (dopo_cheats_edit(&c))
+  {
+    c.doors = !c.doors;
+    dopo_cheats_request(&c);
+  }
+}
+
 /**
  * @brief The assists' openings, OFF and then degrees on each side of the
  * crosshair, the same steps for both; 45 covers the 4:3 screen and 50 a
@@ -109,13 +120,14 @@ static menuitem_t dopo_cheats_items[] =
   {1, "", dopo_toggle_cheat_life,    'l', "Infinite Life"},
   {1, "", dopo_toggle_cheat_damage,  'd', "Infinite Damage"},
   {1, "", dopo_toggle_cheat_weapons, 'w', "All Weapons"},
+  {1, "", dopo_toggle_cheat_doors,   'u', "Unlocked Doors"},
   {2, "", dopo_adjust_cheat_aim,     'i', "Aim Assist"},
   {2, "", dopo_adjust_cheat_trigger, 't', "Trigger Assist"},
 };
 
 static menu_t dopo_cheats_def =
 {
-  6,
+  7,
   &dopo_dopo_options_def,
   dopo_cheats_items,
   dopo_cheats_draw,
@@ -129,16 +141,17 @@ static void dopo_cheats_draw(void)
   const dbool *const values[] =
   {
     &cheats->ammo, &cheats->life, &cheats->damage, &cheats->weapons,
+    &cheats->doors,
   };
   char aim[16], trigger[16];
 
   dopo_menu_big(&dopo_cheats_def);
   dopo_menu_title("CHEATS");
-  dopo_menu_toggles(&dopo_cheats_def, values, 4);
+  dopo_menu_toggles(&dopo_cheats_def, values, 5);
   dopo_menu_format(aim, sizeof(aim), cheats->aim_assist, "DEG");
   dopo_menu_format(trigger, sizeof(trigger), cheats->trigger_assist, "DEG");
-  dopo_menu_value(&dopo_cheats_def, 4, aim, CR_GOLD);
-  dopo_menu_value(&dopo_cheats_def, 5, trigger, CR_GOLD);
+  dopo_menu_value(&dopo_cheats_def, 5, aim, CR_GOLD);
+  dopo_menu_value(&dopo_cheats_def, 6, trigger, CR_GOLD);
 }
 
 void dopo_cheats_open(int choice)

@@ -25,7 +25,8 @@ extern dbool quit_pressed;
 /* START: type, complevel, mode, skill, episode, map, players, cheats,
  * then the G_WriteOptions block */
 #define DOPO_START_CHEATS  7
-#define DOPO_START_OPTIONS (DOPO_START_CHEATS + 6)
+#define DOPO_CHEATS_SIZE   7
+#define DOPO_START_OPTIONS (DOPO_START_CHEATS + DOPO_CHEATS_SIZE)
 #define DOPO_START_SIZE    (DOPO_START_OPTIONS + GAME_OPTION_SIZE)
 
 /* TIC: type, tic, slot, then the ticcmd */
@@ -124,6 +125,7 @@ static void dopo_put_cheats(uint8_t *p, const dopo_cheats_t *c)
   p[3] = c->damage != 0;
   p[4] = (uint8_t)c->aim_assist;
   p[5] = (uint8_t)c->trigger_assist;
+  p[6] = c->doors != 0;
 }
 
 static void dopo_get_cheats(const uint8_t *p, dopo_cheats_t *c)
@@ -134,6 +136,7 @@ static void dopo_get_cheats(const uint8_t *p, dopo_cheats_t *c)
   c->damage         = p[3];
   c->aim_assist     = p[4];
   c->trigger_assist = p[5];
+  c->doors          = p[6];
 }
 
 static void dopo_put_cmd(uint8_t *p, const ticcmd_t *cmd)
@@ -567,7 +570,7 @@ void dopo_mp_send_tic(int slot, int tic, const ticcmd_t *cmd)
 
 void dopo_mp_send_cheats(int tic)
 {
-  uint8_t p[11];
+  uint8_t p[5 + DOPO_CHEATS_SIZE];
 
   if (!dopo_send || !dopo_mp_is_host())
     return;
@@ -819,7 +822,7 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
       break;
 
     case DOPO_MP_CHEATS:
-      if (!host && len >= 11)
+      if (!host && len >= 5 + DOPO_CHEATS_SIZE)
       {
         dopo_cheats_t cheats;
 
