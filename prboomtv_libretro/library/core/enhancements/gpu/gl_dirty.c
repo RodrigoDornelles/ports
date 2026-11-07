@@ -80,6 +80,31 @@
     memcpy(screens[scrn].data, fs_cache, surf_bytes);
 /* @endpatch */
 
+/**
+ * @brief The intermission's background, which wi_stuff.c caches apart from
+ * the pages above and copied straight into the frame without marking it:
+ * in gl the background never reached the screen, only the animations over
+ * it and the rows the key comparison caught. Now the same as those pages,
+ * a GPU image sent again when the cache is redrawn, or a copy that marks
+ * the whole frame.
+ *
+ * @patch src/wi_stuff.c 50
+ */
+#include "prboomtv/gpu/render_gl.h"
+/* @endpatch */
+
+/** @patch src/wi_stuff.c 521 */
+        dopo_gl_2d_image_dirty(wi_bg_cache);
+/* @endpatch */
+
+/** @patch src/wi_stuff.c 531-531 */
+    if (FB == 0 && dopo_gl_2d_image_full(wi_bg_cache))
+      return;
+    if (FB == 0)
+      dopo_gl_dirty(0, SCREENHEIGHT - 1);
+    memcpy(screens[FB].data, wi_bg_cache, fb_bytes);
+/* @endpatch */
+
 /** @patch src/v_video.c 1116 */
   dopo_gl_2d_suspend(TRUE);
 /* @endpatch */
