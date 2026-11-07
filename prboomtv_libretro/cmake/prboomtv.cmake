@@ -437,6 +437,11 @@ if (EMSCRIPTEN)
     set(PRBOOMTV_GAMES_URL
         "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/games.json"
         CACHE STRING "games.json of the web build; its url and banner fields are relative to it")
+    # the SoundFonts of the Music tab, fetched by the page: [{"title", "url",
+    # "author", "license"}], url relative to it; next to games.json
+    string(REGEX REPLACE "/[^/]*$" "/midi.json" prboomtv_midi_default "${PRBOOMTV_GAMES_URL}")
+    set(PRBOOMTV_MIDI_URL "${prboomtv_midi_default}"
+        CACHE STRING "midi.json of the web build, the SoundFonts the Music tab plays on")
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
@@ -461,9 +466,43 @@ if (EMSCRIPTEN)
         "title=PrBoomTV"
         "description=Doom and friends in the browser, alone or with friends."
         "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
-        "title_before=PrBoom" "title_accent=TV" "online=1"
+        "title_before=PrBoom" "title_accent=TV" "online=1" "midi=${PRBOOMTV_MIDI_URL}"
         "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
     list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
+
+    # the index's Music tab: upstream's MIDI players alone, the OPL and
+    # fluidlite with the core's patches, which render a song of the game's
+    # WAD for the page (library/music)
+    set(prboomtv_music_files "")
+    foreach(file ${prboomtv_files})
+        if (file MATCHES "/deps/fluidlite/src/")
+            list(APPEND prboomtv_music_files "${file}")
+        endif()
+    endforeach()
+    add_executable(prboomtv_music
+        "${PRBOOMTV_DIR}/library/music/music.c"
+        "${PRBOOMTV_DIR}/library/music/opl.c"
+        "${PRBOOMTV_DIR}/library/music/fluid.c"
+        "${PRBOOM_DIR}/src/opl.c"
+        "${PRBOOM_DIR}/src/dbopl.c"
+        "${PRBOOM_DIR}/src/opl_queue.c"
+        "${PRBOOM_DIR}/src/midifile.c"
+        "${PRBOOM_DIR}/src/mus2mid.c"
+        "${PRBOOM_DIR}/src/memio.c"
+        "${PRBOOM_DIR}/libretro/libretro-common/formats/vorbis/rvorbis.c"
+        "${PRBOOM_DIR}/libretro/libretro-common/encodings/encoding_crc32.c"
+        ${prboomtv_music_files})
+    # fluid.c includes the patched flplayer.c, found before upstream's
+    target_include_directories(prboomtv_music BEFORE PRIVATE "${PRBOOMTV_PATCHS_OUTPUT}/src")
+    target_include_directories(prboomtv_music SYSTEM PRIVATE
+        "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro/libretro-common/include"
+        "${PRBOOM_DIR}/deps/fluidlite/include" "${PRBOOM_DIR}/deps/fluidlite/src")
+    target_compile_definitions(prboomtv_music PRIVATE INLINE=inline _DEFAULT_SOURCE HAVE_LIBFLUIDSYNTH)
+    set_target_properties(prboomtv_music PROPERTIES
+        C_STANDARD 99
+        C_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${prboomtv_www}"
+        LINK_FLAGS "-sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=PrBoomTVMusic -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH -sFORCE_FILESYSTEM -sEXPORTED_RUNTIME_METHODS=FS -sEXPORTED_FUNCTIONS=_malloc,_free")
 
     # offline, the copy of the last configure stands in
     set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")

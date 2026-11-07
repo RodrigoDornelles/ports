@@ -144,6 +144,9 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .field { display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; }
 .field > span, .field > legend { padding: 0; color: var(--muted); font-size: 14px; }
 .field.grow { flex: 1 1 180px; }
+/* a bar with two buttons: growing fields that start smaller, a wider fixed one */
+.field.grow.short { flex-basis: 130px; }
+.field.wide { flex: 0 1 170px; }
 .field.disabled { opacity: 0.45; }
 
 input[type=text] {
@@ -199,6 +202,8 @@ select {
 /* a bar with nothing but its button */
 .bar.solo { justify-content: center; }
 .bar.solo .go { margin-left: 0; }
+/* a second button after the first: outlined, beside it */
+.go + .go { margin-left: 0; border: 1px solid var(--line); background: var(--raised); color: var(--text); }
 
 .status { min-height: 1.5em; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .status.error { color: var(--ok); }
