@@ -25,10 +25,31 @@
 </head>
 <body class="play">
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+
+  <!-- touch screens: a stick, fire and use, and the menu, over the game
+       (gamepadzilla presses the keys RetroArch maps to the RetroPad) -->
+  <div class="touch" aria-hidden="true">
+    <canvas class="gpz-joy touch-stick" width="128" height="128"
+            data-gpz-bind="ArrowUp ArrowLeft ArrowDown ArrowRight"></canvas>
+    <canvas class="gpz-btn touch-fire" width="64" height="64" data-gpz-bind="KeyS"
+            data-gpz-color="#88888880" data-gpz-color-action="#d6402bc0"></canvas>
+    <canvas class="gpz-btn touch-use" width="64" height="64" data-gpz-bind="KeyX"
+            data-gpz-color="#88888880" data-gpz-color-action="#e8b04ac0"></canvas>
+    <button type="button" class="touch-menu" id="touch-menu">MENU</button>
+  </div>
+  <button type="button" class="install" id="install" hidden>Install</button>
+
+  <div id="rotate" role="alert">
+    <svg class="phone" viewBox="0 0 48 48" width="64" height="64" aria-hidden="true"><rect x="14" y="4" width="20" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="38" r="2" fill="currentColor"/></svg>
+    <p>Turn your phone sideways to play.</p>
+  </div>
+
   <div id="loading">
     <img class="banner" src="{{banner}}" alt="">
     <p id="status">Loading {{title}}...</p>
   </div>
+
+  <script src="../retroarch/gamepadzilla.js" defer></script>
 
   <script type="module">
     /* installed or not, the game is kept on this device for the next start;
@@ -42,6 +63,38 @@
       .catch((e) => console.warn('[prboomtv] cache:', e));
 
     import { play, hashParams, coreOptions, loadOptions } from '../retroarch/player.js';
+
+    /* RetroArch hears keys on the canvas; gamepadzilla's (and the menu
+     * button's) are made up on window, so they go on to the canvas, not
+     * bubbling, so they don't come back here */
+    const canvas = document.getElementById('canvas');
+    const press = (type, code, key, keyCode) => canvas.dispatchEvent(
+      new KeyboardEvent(type, { code, key, keyCode, which: keyCode, bubbles: false, cancelable: true }));
+    for (const type of ['keydown', 'keyup'])
+      addEventListener(type, (event) => {
+        if (!event.isTrusted) press(type, event.code, event.key, event.keyCode);
+      });
+    const menu = document.getElementById('touch-menu');
+    menu.addEventListener('pointerdown', (event) => { event.preventDefault(); press('keydown', 'Enter', 'Enter', 13); });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave'])
+      menu.addEventListener(type, () => press('keyup', 'Enter', 'Enter', 13));
+
+    /* installing: the browser's offer, on a button, while not installed */
+    const install = document.getElementById('install');
+    let offer = null;
+    addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      offer = event;
+      install.hidden = false;
+    });
+    install.addEventListener('click', async () => {
+      if (!offer) return;
+      offer.prompt();
+      await offer.userChoice.catch(() => {});
+      offer = null;
+      install.hidden = true;
+    });
+    addEventListener('appinstalled', () => { install.hidden = true; });
 
     const title = document.querySelector('meta[property="og:title"]').content;
     const content = document.querySelector('meta[name="prboomtv:content"]').content;
@@ -77,7 +130,7 @@
     /* the sound starts with the first key or click: browsers hold audio
      * back until the page is interacted with */
     play({
-      canvas: document.getElementById('canvas'),
+      canvas,
       core: 'prboomtv_libretro.js',
       content,
       playlist: await soundfont(hashParams().get('music')),

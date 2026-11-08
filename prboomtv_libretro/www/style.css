@@ -31,7 +31,7 @@ html, body {
 }
 
 /* the game page */
-body.play { overflow: hidden; }
+body.play { overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
 
 #canvas {
   display: block;
@@ -44,6 +44,7 @@ body.play { overflow: hidden; }
 #loading {
   position: fixed;
   inset: 0;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -64,3 +65,78 @@ body.play { overflow: hidden; }
 #status.error { color: var(--ok); }
 
 a { color: var(--ok); }
+
+/* touch controls, over the game: only on touch screens */
+.touch { display: none; }
+
+.touch canvas, .touch button {
+  position: fixed;
+  z-index: 2;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-stick { left: 4vmin; bottom: 8vmin; width: 40vmin; height: 40vmin; }
+.touch-fire { right: 5vmin; bottom: 8vmin; width: 26vmin; height: 26vmin; }
+.touch-use { right: 31vmin; bottom: 4vmin; width: 17vmin; height: 17vmin; }
+
+.touch-menu {
+  top: 3vmin;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 22vmin;
+  padding: 1.5vmin 4vmin;
+  border: 2px solid #000;
+  border-radius: 6px;
+  background: #88888880;
+  color: #fff;
+  font: 700 3.6vmin/1 system-ui, sans-serif;
+  letter-spacing: 0.1em;
+}
+
+.touch-menu:active { background: #44444480; }
+
+.install {
+  position: fixed;
+  z-index: 3;
+  top: 12px;
+  right: 12px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* the phone held upright: the game wants it sideways */
+#rotate { display: none; }
+
+@media (hover: none) and (pointer: coarse) {
+  .touch { display: block; }
+
+  @media (orientation: portrait) {
+    #rotate {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      text-align: center;
+    }
+  }
+}
+
+#rotate .phone { animation: turn 2s ease-in-out infinite; }
+
+@keyframes turn {
+  0%, 25% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(-90deg); }
+}
