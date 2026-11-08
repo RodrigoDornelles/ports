@@ -74,6 +74,16 @@ static uint8_t dopo_start_packet[DOPO_START_SIZE];
 static dbool   dopo_end_pending;
 
 /**
+ * @brief Client: the host is gone once nothing came from it for that long,
+ * as it pings every DOPO_PING_FRAMES. RetroArch never tells a core on the
+ * packet interface that the host left, it only stops passing packets, so
+ * the session would wait forever. Long enough for the host to load a level
+ * on a TV box.
+ */
+#define DOPO_HOST_SILENCE_MS 10000
+static unsigned long dopo_host_heard;
+
+/**
  * @brief Events (KILL, TELEPORT, LEVEL packets) waiting for their tic, in
  * the order they came.
  */
@@ -534,7 +544,7 @@ static void dopo_begin_game(const uint8_t *p)
 /**
  * @brief Every machine: back to a game of one, on the title screen.
  */
-static void dopo_end_game(void)
+static void dopo_end_game(const char *message)
 {
   int i;
 
@@ -544,15 +554,44 @@ static void dopo_end_game(void)
     playeringame[i] = FALSE;
   consoleplayer = displayplayer = 0;
   D_StartTitle();
-  M_StartMessage("The netgame ended.\n\nPress a key.", NULL, FALSE);
+  M_StartMessage(message, NULL, FALSE);
+}
+
+/**
+ * @brief Client: the host left or went silent; the session ends here, the
+ * game too, and a frontend that hosts rooms for the core drops its
+ * connection, so this machine plays alone or joins another room.
+ */
+static void dopo_host_lost(const char *message)
+{
+  const dbool game = dopo_state == DOPO_MP_GAME;
+
+  lprintf(LO_INFO, "dopo_mp: %s", message);
+  dopo_state = DOPO_MP_OFF;
+  dopo_send = NULL;
+  dopo_start_pending = FALSE;
+  dopo_end_pending = FALSE;
+  if (game)
+    dopo_end_game(message);
+  else
+  {
+    M_ClearMenus();
+    M_StartMessage(message, NULL, FALSE);
+  }
+  if (dopo_rooms_available())
+    dopo_rooms_leave();
 }
 
 void dopo_mp_frame(void)
 {
+  if (dopo_state != DOPO_MP_OFF && !dopo_mp_is_host() &&
+      dopo_now_ms() - dopo_host_heard > DOPO_HOST_SILENCE_MS)
+    dopo_host_lost("The host left.\n\nPress a key.");
+
   if (dopo_end_pending)
   {
     dopo_end_pending = FALSE;
-    dopo_end_game();
+    dopo_end_game("The netgame ended.\n\nPress a key.");
   }
 
   if (!dopo_start_pending)
@@ -633,6 +672,7 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
   dopo_start_pending = FALSE;
   dopo_rejected_count = 0;
   dopo_tics[1] = 0;
+  dopo_host_heard = dopo_now_ms();
   dopo_config.skill = defaultskill - 1;
   if (self == DOPO_MP_HOST)
   {
@@ -766,6 +806,8 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
 
   if (!len || dopo_state == DOPO_MP_OFF)
     return;
+  if (!host)
+    dopo_host_heard = dopo_now_ms();
 
   switch (p[0])
   {
@@ -868,6 +910,11 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
       }
       break;
 
+    case DOPO_MP_CLOSE:
+      if (!host)
+        dopo_host_lost("The host closed the room.\n\nPress a key.");
+      return;
+
     case DOPO_MP_TICS:
       if (!host && len >= 2 && len >= 2 + (size_t)p[1] * DOPO_TICS_ENTRY)
         for (i = 0; i < p[1]; i++)
@@ -952,6 +999,17 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
           dopo_slots[i].ping = ping == 0xFFFF ? -1 : (int)ping;
         }
       break;
+  }
+}
+
+void dopo_mp_close(void)
+{
+  const uint8_t p[1] = { DOPO_MP_CLOSE };
+
+  if (dopo_state != DOPO_MP_OFF && dopo_mp_is_host() && dopo_send)
+  {
+    dopo_tics_flush();
+    dopo_send(DOPO_MP_ALL, p, sizeof(p));
   }
 }
 

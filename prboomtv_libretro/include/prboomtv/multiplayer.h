@@ -183,6 +183,9 @@ void dopo_mp_frame(void);
  */
 void dopo_mp_send_tic(int slot, int tic, const ticcmd_t *cmd);
 
+/** @brief Host: tells everyone the room closes, before leaving it. */
+void dopo_mp_close(void);
+
 /** @brief Host only: sends cheats stamped for a tic. */
 void dopo_mp_send_cheats(int tic);
 

@@ -12,6 +12,7 @@
 #include "dopo/netplay.h"
 #include "doomdef.h"
 #include "prboomtv/rooms.h"
+#include "prboomtv/multiplayer.h"
 #include "prboomtv/version.h"
 
 #define JSMN_STATIC
@@ -399,6 +400,7 @@ dbool dopo_rooms_join(int i)
 void dopo_rooms_leave(void)
 {
   dopo_join_pending = FALSE;
+  dopo_mp_close();
   dopo_environment(DOPO_ENVIRONMENT_NETPLAY_DISCONNECT, NULL);
 }
 
