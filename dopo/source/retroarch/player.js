@@ -32,6 +32,28 @@ const CONFIG = `${USERDATA}/retroarch.cfg`;
 /* outside userdata: not kept, the options always come from the page */
 const CORE_OPTIONS = `${HOME}/core-options.cfg`;
 
+/* RetroArch's keyboard hotkeys (configuration.c), all off: their keys are
+ * the game's (Esc, space, F2...) */
+const HOTKEYS = [
+  'ai_service', 'audio_mute', 'cheat_index_minus', 'cheat_index_plus',
+  'cheat_toggle', 'close_content', 'desktop_menu_toggle',
+  'disk_eject_toggle', 'disk_next', 'disk_prev', 'enable_hotkey',
+  'exit_emulator', 'fps_toggle', 'frame_advance', 'game_focus_toggle',
+  'grab_mouse_toggle', 'halt_replay', 'hold_fast_forward', 'hold_slowmotion',
+  'load_state', 'menu_toggle', 'netplay_fade_chat_toggle',
+  'netplay_game_watch', 'netplay_host_toggle', 'netplay_ping_toggle',
+  'netplay_player_chat', 'next_replay_checkpoint', 'osk_toggle',
+  'overlay_next', 'pause_toggle', 'play_replay', 'preempt_toggle',
+  'prev_replay_checkpoint', 'recording_toggle', 'record_replay',
+  'replay_slot_decrease', 'replay_slot_increase', 'reset', 'rewind',
+  'runahead_toggle', 'save_replay_checkpoint', 'save_state', 'screenshot',
+  'shader_hold', 'shader_next', 'shader_prev', 'shader_toggle',
+  'state_slot_decrease', 'state_slot_increase', 'streaming_toggle',
+  'toggle_fast_forward', 'toggle_fullscreen', 'toggle_slowmotion',
+  'toggle_statistics', 'toggle_vrr_runloop', 'turbo_fire_toggle',
+  'volume_down', 'volume_up',
+];
+
 /** retroarch.cfg values for the browser, on top of what the user saved. */
 const DEFAULTS = {
   menu_driver: 'rgui',
@@ -43,6 +65,7 @@ const DEFAULTS = {
   savefile_directory: `${USERDATA}/saves`,
   savestate_directory: `${USERDATA}/states`,
   system_directory: `${USERDATA}/system`,
+  ...Object.fromEntries(HOTKEYS.map((name) => [`input_${name}`, 'nul'])),
 };
 
 function setConfig(text, values) {
