@@ -256,6 +256,29 @@ set(prboomtv_upstream_files
     libretro/libretro-common/rthreads/retro_eventcount.c
 )
 
+# upstream's WANT_FLUIDSYNTH=1, the MIDI player on fluidlite, which the core
+# builds on every platform; its .sf3 samples decode with rvorbis instead of
+# libvorbis and libogg (library/core/enhancements/midi/vorbis.c)
+set(prboomtv_fluidlite_files
+    deps/fluidlite/src/fluid_chan.c
+    deps/fluidlite/src/fluid_chorus.c
+    deps/fluidlite/src/fluid_conv.c
+    deps/fluidlite/src/fluid_defsfont.c
+    deps/fluidlite/src/fluid_dsp_float.c
+    deps/fluidlite/src/fluid_gen.c
+    deps/fluidlite/src/fluid_hash.c
+    deps/fluidlite/src/fluid_list.c
+    deps/fluidlite/src/fluid_mod.c
+    deps/fluidlite/src/fluid_ramsfont.c
+    deps/fluidlite/src/fluid_rev.c
+    deps/fluidlite/src/fluid_settings.c
+    deps/fluidlite/src/fluid_synth.c
+    deps/fluidlite/src/fluid_sys.c
+    deps/fluidlite/src/fluid_tuning.c
+    deps/fluidlite/src/fluid_voice.c
+)
+list(APPEND prboomtv_upstream_files ${prboomtv_fluidlite_files})
+
 if (EMSCRIPTEN)
     # linked into RetroArch (dopo/cmake/retroarch.cmake), which brings
     # its own libretro-common, as upstream's STATIC_LINKING does; and no
@@ -325,29 +348,24 @@ endif()
 file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
     "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/gldefs.h" ONLY_IF_DIFFERENT)
 
-set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
-dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files})
-
-set(prboomtv_files "")
-set(prboomtv_patched_dirs "")
+# the core builds from a copy of upstream with the patched files over it,
+# so a patched header reaches every file that includes it
+set(PRBOOMTV_TREE "${CMAKE_BINARY_DIR}/prboomtv/tree")
+dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_TREE}" TREE ${prboomtv_patch_files})
 foreach(file ${prboomtv_patched_files})
-    if (NOT file IN_LIST prboomtv_upstream_files)
+    if (NOT file IN_LIST prboomtv_upstream_files AND NOT file MATCHES "\\.(h|inl)$")
         message(FATAL_ERROR "prboomtv: ${file} is patched but is not compiled by the core")
     elseif (file IN_LIST prboomtv_override_files)
         message(FATAL_ERROR "prboomtv: ${file} is both patched and replaced in library/core/")
     endif()
-    # the patched copy lives in the build tree, so its quoted includes need
-    # the original directory to keep resolving like upstream
-    get_filename_component(dir "${PRBOOM_DIR}/${file}" DIRECTORY)
-    list(APPEND prboomtv_patched_dirs "${dir}")
 endforeach()
+
+set(prboomtv_files "")
 foreach(file ${prboomtv_upstream_files})
     if (file IN_LIST prboomtv_override_files)
         list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
-    elseif (file IN_LIST prboomtv_patched_files)
-        list(APPEND prboomtv_files "${PRBOOMTV_PATCHS_OUTPUT}/${file}")
     else()
-        list(APPEND prboomtv_files "${PRBOOM_DIR}/${file}")
+        list(APPEND prboomtv_files "${PRBOOMTV_TREE}/${file}")
     endif()
 endforeach()
 foreach(file ${prboomtv_override_files})
@@ -355,7 +373,6 @@ foreach(file ${prboomtv_override_files})
         list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
     endif()
 endforeach()
-list(REMOVE_DUPLICATES prboomtv_patched_dirs)
 
 if (EMSCRIPTEN)
     add_library(prboomtv_libretro STATIC "${prboomtv_files}")
@@ -365,11 +382,11 @@ endif()
 target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include"
     "${PRBOOMTV_INCLUDE_GENERATED}")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
-    "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
-    "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
-    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}")
+    "${PRBOOMTV_TREE}" "${PRBOOMTV_TREE}/src" "${PRBOOMTV_TREE}/libretro"
+    "${PRBOOMTV_TREE}/libretro/libretro-common/include"
+    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}" "${PRBOOMTV_TREE}/deps/fluidlite/include")
 target_compile_definitions(prboomtv_libretro PRIVATE
-    HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG
+    HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_LIBFLUIDSYNTH
     INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE
     DOPO_VERSION_MAJOR=${PRBOOMTV_VERSION_MAJOR} DOPO_VERSION_PATCH=${PRBOOMTV_VERSION_PATCH})
 target_compile_options(prboomtv_libretro PRIVATE -Wall -W -Wno-unused-parameter -fomit-frame-pointer)
@@ -414,6 +431,13 @@ if (EMSCRIPTEN)
     set(PRBOOMTV_GAMES_URL
         "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/games.json"
         CACHE STRING "games.json of the web build; its url and banner fields are relative to it")
+    # the SoundFonts of the Music tab and of the Play tab's Music field (the
+    # game page adds the bank picked to the playlist), fetched by the pages:
+    # [{"title", "url", "author", "license"}], url relative to it; next to
+    # games.json
+    string(REGEX REPLACE "/[^/]*$" "/midi.json" prboomtv_midi_default "${PRBOOMTV_GAMES_URL}")
+    set(PRBOOMTV_MIDI_URL "${prboomtv_midi_default}"
+        CACHE STRING "midi.json of the web build, the SoundFonts the music plays on")
 
     set(prboomtv_www "${PORTS_DIST}/prboomtv")
     set(prboomtv_www_outputs "")
@@ -438,9 +462,42 @@ if (EMSCRIPTEN)
         "title=PrBoomTV"
         "description=Doom and friends in the browser, alone or with friends."
         "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
-        "title_before=PrBoom" "title_accent=TV" "online=1"
+        "title_before=PrBoom" "title_accent=TV" "online=1" "midi=${PRBOOMTV_MIDI_URL}"
         "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
     list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")
+
+    # the index's Music tab: upstream's MIDI players alone, the OPL and
+    # fluidlite with the core's patches, which render a song of the game's
+    # WAD for the page (library/music)
+    set(prboomtv_music_files "")
+    foreach(file ${prboomtv_files})
+        if (file MATCHES "/deps/fluidlite/src/")
+            list(APPEND prboomtv_music_files "${file}")
+        endif()
+    endforeach()
+    add_executable(prboomtv_music
+        "${PRBOOMTV_DIR}/library/music/music.c"
+        "${PRBOOMTV_DIR}/library/music/opl.c"
+        "${PRBOOMTV_DIR}/library/music/fluid.c"
+        "${PRBOOMTV_TREE}/src/opl.c"
+        "${PRBOOMTV_TREE}/src/dbopl.c"
+        "${PRBOOMTV_TREE}/src/opl_queue.c"
+        "${PRBOOMTV_TREE}/src/midifile.c"
+        "${PRBOOMTV_TREE}/src/mus2mid.c"
+        "${PRBOOMTV_TREE}/src/memio.c"
+        "${PRBOOMTV_TREE}/libretro/libretro-common/formats/vorbis/rvorbis.c"
+        "${PRBOOMTV_TREE}/libretro/libretro-common/encodings/encoding_crc32.c"
+        ${prboomtv_music_files})
+    # fluid.c includes the patched flplayer.c of the tree
+    target_include_directories(prboomtv_music SYSTEM PRIVATE
+        "${PRBOOMTV_TREE}" "${PRBOOMTV_TREE}/src" "${PRBOOMTV_TREE}/libretro/libretro-common/include"
+        "${PRBOOMTV_TREE}/deps/fluidlite/include" "${PRBOOMTV_TREE}/deps/fluidlite/src")
+    target_compile_definitions(prboomtv_music PRIVATE INLINE=inline _DEFAULT_SOURCE HAVE_LIBFLUIDSYNTH)
+    set_target_properties(prboomtv_music PROPERTIES
+        C_STANDARD 99
+        C_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${prboomtv_www}"
+        LINK_FLAGS "-sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=PrBoomTVMusic -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH -sFORCE_FILESYSTEM -sEXPORTED_RUNTIME_METHODS=FS -sEXPORTED_FUNCTIONS=_malloc,_free")
 
     # offline, the copy of the last configure stands in
     set(prboomtv_games_source "${CMAKE_BINARY_DIR}/prboomtv/games.json")
@@ -469,6 +526,7 @@ if (EMSCRIPTEN)
             --template "${PRBOOMTV_DIR}/www/game.html"
             --manifest "${PRBOOMTV_DIR}/www/game.webmanifest"
             --output "${prboomtv_www}"
+            --midi "${PRBOOMTV_MIDI_URL}"
         RESULT_VARIABLE prboomtv_games_result
         ERROR_VARIABLE prboomtv_games_error)
     if (prboomtv_games_result)

@@ -1,7 +1,7 @@
 # RetroArch's web player (Makefile.emscripten) with a core linked in, plus
-# the dopo patchs of source/retroarch/: the dopo netplay calls, with rooms and
-# netplay over WebRTC (Trystero), so cores list, host and join rooms from
-# their own menus in the browser.
+# the dopo patchs of source/retroarch/: the dopo netplay calls, with rooms in
+# a Supabase project's lobby (dopo/supabase) and netplay over WebRTC, so cores
+# list, host and join rooms from their own menus in the browser.
 set(RETROARCH_VERSION "v1.22.2")
 set(RETROARCH_DOWNLOAD "https://github.com/libretro/RetroArch/archive/refs/tags/${RETROARCH_VERSION}.tar.gz")
 set(RETROARCH_SOURCE_DIR "${CMAKE_SOURCE_DIR}/vendor/retroarch_source")
@@ -102,7 +102,17 @@ endfunction()
 add_custom_command(OUTPUT "${PORTS_DIST}/retroarch/player.js"
     COMMAND "${CMAKE_COMMAND}" -E copy "${RETROARCH_DIR}/player.js" "${PORTS_DIST}/retroarch/player.js"
     DEPENDS "${RETROARCH_DIR}/player.js")
-add_custom_target(retroarch_www ALL DEPENDS "${PORTS_DIST}/retroarch/player.js")
+# the touch controls the pages put over the game (gamepadzilla, npm.cmake)
+include("${DOPO_DIR}/cmake/npm.cmake")
+dopo_npm_file(retroarch_gamepadzilla "gamepadzilla/dist/gamepadzilla.js")
+add_custom_command(OUTPUT "${PORTS_DIST}/retroarch/gamepadzilla.js"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${retroarch_gamepadzilla}" "${PORTS_DIST}/retroarch/gamepadzilla.js"
+    DEPENDS "${retroarch_gamepadzilla}")
+add_custom_target(retroarch_www ALL DEPENDS "${PORTS_DIST}/retroarch/player.js"
+    "${PORTS_DIST}/retroarch/gamepadzilla.js")
+
+# the netplay lobby's Supabase project, all public (dopo/supabase/lobby.json)
+configure_file("${CMAKE_SOURCE_DIR}/dopo/supabase/lobby.json" "${PORTS_DIST}/retroarch/lobby.json" COPYONLY)
 
 if (TARGET prboomtv_libretro)
     retroarch_web_player(prboomtv_libretro prboomtv "${PORTS_DIST}/prboomtv")

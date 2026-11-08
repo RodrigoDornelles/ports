@@ -143,13 +143,19 @@ h2 { margin: 24px 0 10px; font-size: 18px; }
 fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .field { display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; }
 .field > span, .field > legend { padding: 0; color: var(--muted); font-size: 14px; }
-.field.grow { flex: 1 1 180px; }
+/* the growing field takes the room left on its line before the button does */
+.field.grow { flex: 100 1 140px; }
+/* a bar with two buttons: growing fields that start smaller, a wider fixed one */
+.field.grow.short { flex-basis: 120px; }
+.field.wide { flex: 0 1 150px; }
+/* a select gives way as its field shrinks, so the bar keeps to one line */
+.field > select { width: 100%; }
 .field.disabled { opacity: 0.45; }
 
 input[type=text] {
   width: 100%;
   min-height: 44px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
@@ -170,7 +176,7 @@ select {
 .segmented span {
   display: block;
   min-height: 44px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   border: 1px solid var(--line);
   background: var(--bg);
   cursor: pointer;
@@ -180,10 +186,12 @@ select {
 .segmented input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .segmented input:focus-visible + span { outline: 2px solid var(--ok); outline-offset: 1px; }
 
+/* at the end of the line; alone on a line of its own, it fills it */
 .go {
+  flex: 1 0 auto;
   min-height: 44px;
   margin-left: auto;
-  padding: 10px 28px;
+  padding: 9px 28px;
   border: 0;
   border-radius: 6px;
   background: var(--accent);
@@ -198,7 +206,9 @@ select {
 .go:disabled { opacity: 0.45; cursor: not-allowed; }
 /* a bar with nothing but its button */
 .bar.solo { justify-content: center; }
-.bar.solo .go { margin-left: 0; }
+.bar.solo .go { flex-grow: 0; margin-left: 0; }
+/* a second button after the first: outlined, beside it */
+.go + .go { margin-left: 0; border: 1px solid var(--line); background: var(--raised); color: var(--text); }
 
 .status { min-height: 1.5em; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .status.error { color: var(--ok); }
@@ -394,5 +404,7 @@ input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(-
 @media (max-width: 520px) {
   .games { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .go { width: 100%; margin-left: 0; }
+  /* each line of the bar filled, the fields too */
+  .bar > .field, .bar > .field.wide { flex-grow: 1; }
   .ports { grid-template-columns: minmax(0, 1fr); }
 }

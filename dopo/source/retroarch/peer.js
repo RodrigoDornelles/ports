@@ -1,51 +1,209 @@
 /**
- * @brief Netplay's TCP sockets over WebRTC (Trystero), so a browser plays
- * against browsers: emscripten's own sockets (SOCKFS) only reach
- * WebSocket servers and cannot listen at all.
+ * @brief Netplay's TCP sockets over WebRTC, so a browser plays against
+ * browsers: emscripten's own sockets (SOCKFS) only reach WebSocket servers
+ * and cannot listen at all.
  *
- * A host is reached by its Trystero peer id, the address its room has in
- * the lobby (rooms.js): it waits in the Trystero room "game-<its id>", and
- * a player connecting to that id joins the room and talks to it alone
- * through the "net" action, which keeps order and splits large sends as
- * TCP would. Stream sockets take these ops; the others keep emscripten's.
+ * A host is reached by its id (signal.js), the address its room has in
+ * the lobby (rooms.js): it waits on its topic, and a player connecting to
+ * that id meets it there and opens one RTCPeerConnection with one ordered,
+ * reliable data channel to it, a byte stream as TCP is: sends go in
+ * pieces of CHUNK bytes, held back while the channel's buffer is full, and
+ * come out in order on the other side. Stream sockets take these ops; the
+ * others keep emscripten's.
+ *
+ * The meeting: the player knocks with its public key until the host
+ * welcomes it with its own, then sends its offer sealed, the host answers
+ * sealed; each side gathers its ICE candidates whole before sending (no
+ * trickle), so two messages carry the whole handshake.
  *
  * connect() succeeds at once and sends wait for the host: RetroArch waits
  * for a connect by polling with a timeout, which cannot block in the
  * browser, so it would never see one finish.
  *
- * Module.dopo.trystero is the page's Trystero ({joinRoom, selfId}),
- * Module.dopo.rtc its RTCConfiguration and Module.dopo.relays, if
- * given, the relays to meet through (player.js).
+ * Module.dopo.rtc is the RTCConfiguration (player.js).
  */
 mergeInto(LibraryManager.library, {
-  $DOPO_PEER__deps: ['$SOCKFS', '$FS'],
+  $DOPO_PEER__deps: ['$SOCKFS', '$FS', '$DOPO_SIGNAL'],
   $DOPO_PEER__postset: 'DOPO_PEER.install();',
   $DOPO_PEER: {
     /* a host that does not show up by then refuses the connection */
     TIMEOUT: 20000,
+    /* the knock again until the host answers, ICE gathering at most */
+    KNOCK: 2000,
+    GATHER: 3000,
+    /* data channel pieces, and how much may wait in its buffer */
+    CHUNK: 16384,
+    BUFFERED: 1048576,
     next: 1,
 
-    trystero() {
-      var dopo = Module['dopo'] || {};
-      if (!dopo['trystero'])
-        throw new Error('dopo: no Trystero on the page (player.js loads it)');
-      return dopo['trystero'];
+    rtc() {
+      return (Module['dopo'] || {})['rtc'] || {};
     },
 
-    config() {
-      var dopo = Module['dopo'] || {};
-      var config = { appId: dopo['appId'] || 'dopo' };
-      if (dopo['rtc'])
-        config.rtcConfig = dopo['rtc'];
-      if (dopo['relays'])
-        config.relayConfig = { urls: dopo['relays'] };
-      return config;
+    /* once every ICE candidate is in the description, or after GATHER */
+    gathered(pc) {
+      if (pc.iceGatheringState === 'complete')
+        return Promise.resolve();
+      return new Promise((resolve) => {
+        var timer = setTimeout(done, DOPO_PEER.GATHER);
+        function done() {
+          clearTimeout(timer);
+          pc.removeEventListener('icegatheringstatechange', check);
+          resolve();
+        }
+        function check() {
+          if (pc.iceGatheringState === 'complete') done();
+        }
+        pc.addEventListener('icegatheringstatechange', check);
+      });
     },
 
-    /* a Trystero room and its action (the "net" one by default) */
-    join(name, action) {
-      var room = DOPO_PEER.trystero()['joinRoom'](DOPO_PEER.config(), name);
-      return { room, net: room.makeAction(action || 'net') };
+    /* a channel as a byte stream: on.open(), on.data(bytes), on.close()
+     * once; returns { send(bytes), close() } */
+    link(pc, channel, on) {
+      var queue = [];
+      var opened = false;
+      var ended = false;
+      var pump = () => {
+        while (queue.length && channel.readyState === 'open' && channel.bufferedAmount < DOPO_PEER.BUFFERED)
+          channel.send(queue.shift());
+      };
+      var end = () => {
+        if (ended) return;
+        ended = true;
+        queue = [];
+        try { channel.close(); } catch (e) {}
+        try { pc.close(); } catch (e) {}
+        on.close();
+      };
+      channel.binaryType = 'arraybuffer';
+      channel.bufferedAmountLowThreshold = DOPO_PEER.CHUNK * 16;
+      channel.onbufferedamountlow = pump;
+      channel.onopen = () => {
+        if (opened || ended) return;
+        opened = true;
+        pump();
+        on.open();
+      };
+      channel.onmessage = (event) => { if (!ended) on.data(new Uint8Array(event.data)); };
+      channel.onclose = end;
+      pc.addEventListener('connectionstatechange', () => {
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') end();
+      });
+      if (channel.readyState === 'open')
+        setTimeout(channel.onopen);
+      return {
+        send(bytes) {
+          for (var at = 0; at < bytes.length; at += DOPO_PEER.CHUNK)
+            queue.push(bytes.slice(at, at + DOPO_PEER.CHUNK));  /* its own buffer */
+          pump();
+        },
+        close: end
+      };
+    },
+
+    /* to the host whose id is given; returns { send(bytes), close() } */
+    dial(host, on) {
+      var me = DOPO_SIGNAL.id();
+      var topic = 'dopo:' + host;
+      var pc = new RTCPeerConnection(DOPO_PEER.rtc());
+      var link = DOPO_PEER.link(pc, pc.createDataChannel('net', { ordered: true }), on);
+      var key = null;
+      var answered = false;
+      var knocking = 0;
+      var stop = DOPO_SIGNAL.join(topic, async (message) => {
+        if (message.to !== me || message.from !== host) return;
+        try {
+          if (message.t === 'welcome' && !key) {
+            clearInterval(knocking);
+            key = await DOPO_SIGNAL.shared(message.pub);
+            await pc.setLocalDescription(await pc.createOffer());
+            await DOPO_PEER.gathered(pc);
+            DOPO_SIGNAL.send(topic, Object.assign({ t: 'offer', from: me, to: host },
+              await DOPO_SIGNAL.seal(key, pc.localDescription.toJSON())));
+          } else if (message.t === 'answer' && key && !answered) {
+            answered = true;
+            await pc.setRemoteDescription(await DOPO_SIGNAL.open(key, message));
+            stop();
+          }
+        } catch (e) {
+          console.warn('[dopo] dial ' + host + ': ' + e.message);
+          link.close();
+        }
+      });
+      var knock = () => DOPO_SIGNAL.publicKey().then((pub) =>
+        DOPO_SIGNAL.send(topic, { t: 'knock', from: me, to: host, pub }));
+      knock();
+      knocking = setInterval(knock, DOPO_PEER.KNOCK);
+      return {
+        send: link.send,
+        close() {
+          clearInterval(knocking);
+          stop();
+          link.close();
+        }
+      };
+    },
+
+    /* players dialing this page: on.join(id, link) when one's channel opens,
+     * returning { data(bytes), close() }; returns { stop() } */
+    serve(on) {
+      var me = DOPO_SIGNAL.id();
+      var topic = 'dopo:' + me;
+      var peers = {};
+      var forget = (id, peer) => { if (peers[id] === peer) delete peers[id]; };
+      var stop = DOPO_SIGNAL.join(topic, async (message) => {
+        var id = message.from;
+        if (message.to !== me || typeof id !== 'string') return;
+        var peer = peers[id];
+        try {
+          if (message.t === 'knock') {
+            if (peer && peer.pc && peer.pc.connectionState !== 'new' && peer.pc.connectionState !== 'connecting')
+              return;  /* a knock repeated while the last one gets through */
+            if (!peer)
+              peer = peers[id] = { key: DOPO_SIGNAL.shared(message.pub) };
+            DOPO_SIGNAL.send(topic, { t: 'welcome', from: me, to: id, pub: await DOPO_SIGNAL.publicKey() });
+          } else if (message.t === 'offer' && peer && !peer.pc) {
+            var key = await peer.key;
+            var pc = peer.pc = new RTCPeerConnection(DOPO_PEER.rtc());
+            pc.addEventListener('connectionstatechange', () => {
+              if (pc.connectionState === 'failed' || pc.connectionState === 'closed') forget(id, peer);
+            });
+            pc.ondatachannel = (event) => {
+              var player = null;
+              var link = DOPO_PEER.link(pc, event.channel, {
+                open() { player = on.join(id, link); },
+                data(bytes) { if (player) player.data(bytes); },
+                close() {
+                  forget(id, peer);
+                  if (player) player.close();
+                }
+              });
+              peer.link = link;
+            };
+            await pc.setRemoteDescription(await DOPO_SIGNAL.open(key, message));
+            await pc.setLocalDescription(await pc.createAnswer());
+            await DOPO_PEER.gathered(pc);
+            DOPO_SIGNAL.send(topic, Object.assign({ t: 'answer', from: me, to: id },
+              await DOPO_SIGNAL.seal(key, pc.localDescription.toJSON())));
+          }
+        } catch (e) {
+          console.warn('[dopo] serve ' + id + ': ' + e.message);
+          forget(id, peer);
+          if (peer && peer.pc) peer.pc.close();
+        }
+      });
+      return {
+        stop() {
+          stop();
+          Object.keys(peers).forEach((id) => {
+            var peer = peers[id];
+            if (peer.link) peer.link.close();
+            else if (peer.pc) peer.pc.close();
+          });
+          peers = {};
+        }
+      };
     },
 
     /* the stream sockets' ops, emscripten's for the others */
@@ -103,8 +261,7 @@ mergeInto(LibraryManager.library, {
     connect(sock, addr, port) {
       if (sock.dopo)
         throw new FS.ErrnoError({{{ cDefs.EISCONN }}});
-      var game = DOPO_PEER.join('game-' + addr);
-      var dopo = sock.dopo = { open: false, closed: false, out: [], net: game.net };
+      var dopo = sock.dopo = { open: false, closed: false, out: [], send: null };
       var timer = setTimeout(() => {
         if (dopo.open) return;
         sock.error = {{{ cDefs.ECONNREFUSED }}};
@@ -113,17 +270,28 @@ mergeInto(LibraryManager.library, {
       sock.daddr = addr;
       sock.dport = port;
       dopo.target = addr;
-      dopo.leave = () => { clearTimeout(timer); game.room.leave(); };
-      game.room.onPeerJoin = (peer) => {
-        if (peer !== addr || dopo.closed) return;
-        dopo.open = true;
-        dopo.out.forEach((data) => game.net.send(data, { target: addr }));
-        dopo.out = [];
-      };
-      game.room.onPeerLeave = (peer) => { if (peer === addr) dopo.closed = true; };
-      game.net.onMessage = (data, meta) => {
-        if (meta.peerId === addr && !dopo.closed) DOPO_PEER.receive(sock, data);
-      };
+      var link;
+      try {
+        link = DOPO_PEER.dial(addr, {
+          open() {
+            if (dopo.closed) return;
+            clearTimeout(timer);
+            dopo.open = true;
+            dopo.send = link.send;
+            dopo.out.forEach(link.send);
+            dopo.out = [];
+          },
+          data(bytes) { if (!dopo.closed) DOPO_PEER.receive(sock, bytes); },
+          close() { dopo.closed = true; }
+        });
+      } catch (e) {
+        console.warn('[dopo] ' + e.message);
+        clearTimeout(timer);
+        sock.error = {{{ cDefs.ECONNREFUSED }}};
+        dopo.closed = true;
+        return;
+      }
+      dopo.leave = () => { clearTimeout(timer); link.close(); };
     },
 
     /* a host takes players once dopo_peer_host opens its room */
@@ -146,7 +314,7 @@ mergeInto(LibraryManager.library, {
         throw new FS.ErrnoError({{{ cDefs.ENOTCONN }}});
       var data = new Uint8Array(buffer.buffer || buffer, (buffer.byteOffset || 0) + offset, length).slice();
       if (sock.dopo.open)
-        sock.dopo.net.send(data, { target: sock.dopo.target });
+        sock.dopo.send(data);
       else
         sock.dopo.out.push(data);
       return length;
@@ -182,37 +350,40 @@ mergeInto(LibraryManager.library, {
 
     /* the host's room: every player who joins is an accepted socket */
     host(listener, port, room) {
-      var game = DOPO_PEER.join('game-' + DOPO_PEER.trystero()['selfId']);
       var players = {};
       var count = () => Object.keys(players).length;
-
-      game.room.onPeerJoin = (peer) => {
-        if (!listener.server) return;
-        var sock = SOCKFS.createSocket(listener.family, listener.type, listener.protocol);
-        var n = DOPO_PEER.next++;
-        /* a made-up address of the listener's family, for accept() */
-        sock.daddr = listener.family === {{{ cDefs.AF_INET6 }}} ?
-          'fd00::' + n.toString(16) :
-          '10.' + ((n >> 16) & 255) + '.' + ((n >> 8) & 255) + '.' + (n & 255);
-        sock.dport = port;
-        sock.dopo = { open: true, closed: false, out: [], net: game.net, target: peer,
-                      leave: () => { delete players[peer]; room.update(count()); } };
-        players[peer] = sock;
-        listener.pending.push(sock);
-        room.update(count());
-      };
-      game.room.onPeerLeave = (peer) => {
-        if (players[peer]) players[peer].dopo.closed = true;
-        delete players[peer];
-        room.update(count());
-      };
-      game.net.onMessage = (data, meta) => {
-        var sock = players[meta.peerId];
-        if (sock && !sock.dopo.closed) DOPO_PEER.receive(sock, data);
-      };
+      var hosting = DOPO_PEER.serve({
+        join(peer, link) {
+          if (!listener.server) {
+            link.close();
+            return null;
+          }
+          var sock = SOCKFS.createSocket(listener.family, listener.type, listener.protocol);
+          var n = DOPO_PEER.next++;
+          /* a made-up address of the listener's family, for accept() */
+          sock.daddr = listener.family === {{{ cDefs.AF_INET6 }}} ?
+            'fd00::' + n.toString(16) :
+            '10.' + ((n >> 16) & 255) + '.' + ((n >> 8) & 255) + '.' + (n & 255);
+          sock.dport = port;
+          var gone = () => {
+            if (players[peer] !== sock) return;
+            delete players[peer];
+            room.update(count());
+          };
+          sock.dopo = { open: true, closed: false, out: [], send: link.send, target: peer,
+                        leave: () => { gone(); link.close(); } };
+          players[peer] = sock;
+          listener.pending.push(sock);
+          room.update(count());
+          return {
+            data(bytes) { if (!sock.dopo.closed) DOPO_PEER.receive(sock, bytes); },
+            close() { sock.dopo.closed = true; gone(); }
+          };
+        }
+      });
       listener.server.stop = () => {
         room.stop();
-        game.room.leave();
+        hosting.stop();
         Object.keys(players).forEach((peer) => { players[peer].dopo.closed = true; });
         players = {};
       };
@@ -220,11 +391,11 @@ mergeInto(LibraryManager.library, {
   },
 
   /* rooms.c: hosting started, the room opens (and is announced if listed) */
-  dopo_peer_host__deps: ['$DOPO_PEER', '$DOPO_ROOMS', '$UTF8ToString'],
+  dopo_peer_host__deps: ['$DOPO_PEER', '$DOPO_ROOMS', '$DOPO_SIGNAL', '$UTF8ToString'],
   dopo_peer_host: function(port, listed, game, nick, core, version) {
     var fields = {
       game_name: UTF8ToString(game),
-      username: UTF8ToString(nick),
+      username: UTF8ToString(nick).trim() || 'Player',
       core_name: UTF8ToString(core),
       core_version: UTF8ToString(version),
       port
@@ -238,8 +409,14 @@ mergeInto(LibraryManager.library, {
         return;
       }
       var room = listed ? DOPO_ROOMS.announce(fields) : { update() {}, stop() {} };
-      DOPO_PEER.host(listener, port, room);
-      console.log('[dopo] hosting as ' + DOPO_PEER.trystero()['selfId'] + (listed ? ', listed' : ''));
+      try {
+        DOPO_PEER.host(listener, port, room);
+      } catch (e) {
+        console.warn('[dopo] ' + e.message);
+        room.stop();
+        return;
+      }
+      console.log('[dopo] hosting as ' + DOPO_SIGNAL.id() + (listed ? ', listed' : ''));
     };
     start();
   }

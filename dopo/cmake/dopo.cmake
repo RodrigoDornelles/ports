@@ -21,10 +21,18 @@ endfunction()
 include("${CMAKE_CURRENT_LIST_DIR}/nim.cmake")
 dopo_nim_tool(dopo_patchs "${DOPO_DIR}/scripts/patchs.nim")
 
+# TREE first among the patches: output_dir becomes a whole copy of
+# source_dir with the patched files over it (patchs.nim --tree)
 function(dopo_apply_patchs out_var source_dir output_dir)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ARGN})
+    set(patchs ${ARGN})
+    set(mode "")
+    if (patchs MATCHES "^TREE(;|$)")
+        list(POP_FRONT patchs)
+        set(mode --tree)
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${patchs})
     execute_process(
-        COMMAND "${dopo_patchs_TOOL}" --source "${source_dir}" --output "${output_dir}" ${ARGN}
+        COMMAND "${dopo_patchs_TOOL}" --source "${source_dir}" --output "${output_dir}" ${mode} ${patchs}
         RESULT_VARIABLE result
         OUTPUT_VARIABLE patched
         ERROR_VARIABLE error

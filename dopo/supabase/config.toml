@@ -1,0 +1,6 @@
+# The Supabase project of the web build's netplay (supabase/README.md).
+project_id = "dopo"
+
+# the lobby answers like lobby.libretro.com, which asks for no key
+[functions.lobby]
+verify_jwt = false

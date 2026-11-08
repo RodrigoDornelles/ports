@@ -10,7 +10,9 @@
 #include "lprintf.h"
 #include "prboomtv/change_game.h"
 #include "dopo/netplay.h"
+#include "doomdef.h"
 #include "prboomtv/rooms.h"
+#include "prboomtv/multiplayer.h"
 #include "prboomtv/version.h"
 
 #define JSMN_STATIC
@@ -333,7 +335,14 @@ const dopo_room_t *dopo_rooms_get(int i)
   return i >= 0 && i < dopo_rooms_n ? &dopo_rooms[i] : NULL;
 }
 
-void dopo_rooms_create(dbool listed, const char *relay)
+static int dopo_rooms_players = MAXPLAYERS;
+
+int dopo_rooms_limit(void)
+{
+  return dopo_rooms_players;
+}
+
+void dopo_rooms_create(dbool listed, const char *relay, int players)
 {
   struct dopo_netplay_room room = {0};
   char game[64];
@@ -346,6 +355,7 @@ void dopo_rooms_create(dbool listed, const char *relay)
   room.game_name = game;
   room.listed = listed ? true : false;
   room.relay = relay;
+  room.max_players = (unsigned)(dopo_rooms_players = players < 2 ? 2 : players > MAXPLAYERS ? MAXPLAYERS : players);
   dopo_join_pending = FALSE;
   dopo_environment(DOPO_ENVIRONMENT_NETPLAY_POST_LOBBY, &room);
 }
@@ -390,6 +400,7 @@ dbool dopo_rooms_join(int i)
 void dopo_rooms_leave(void)
 {
   dopo_join_pending = FALSE;
+  dopo_mp_close();
   dopo_environment(DOPO_ENVIRONMENT_NETPLAY_DISCONNECT, NULL);
 }
 

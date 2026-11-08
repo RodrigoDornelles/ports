@@ -3,10 +3,10 @@
  * core lists, hosts and joins rooms from its own menus as it does with
  * the dopo frontend.
  *
- * The core gets the lobby it knows: rooms.js hands over a room list in
- * the libretro lobby's format, made of what hosts announce over Trystero
- * instead, each room's address being its host's peer id; connecting to
- * it is a WebRTC channel to that host (peer.js). Requests are taken
+ * The core gets the lobby it knows: rooms.js hands over the room list of
+ * a Supabase project's lobby, which answers in the libretro lobby's format
+ * (dopo/supabase), a browser room's address being its host's id;
+ * connecting to it is a WebRTC channel to that host (peer.js). Requests are taken
  * during retro_run and carried out before the next one, so the core's
  * netpacket start() and stop() come between frames.
  */
@@ -41,6 +41,7 @@ static struct
    char     host[256];
    char     game[128];
    unsigned port;
+   unsigned players;
    bool     listed;
 } dopo_request;
 
@@ -73,6 +74,7 @@ static bool dopo_environment(unsigned cmd, void *data)
             dopo_request.kind   = DOPO_REQUEST_HOST;
             dopo_request.port   = room->port ? room->port : 55435;
             dopo_request.listed = room->listed;
+            dopo_request.players = room->max_players;
             strlcpy(dopo_request.game, room->game_name ? room->game_name : "",
                   sizeof(dopo_request.game));
          }
@@ -105,8 +107,11 @@ static void dopo_requests(void)
    switch (dopo_request.kind)
    {
       case DOPO_REQUEST_HOST:
-         /* announced over Trystero, never in the libretro lobby */
+         /* announced by rooms.js to the page's lobby, never by RetroArch to libretro's */
          settings->uints.netplay_port            = dopo_request.port;
+         /* the room's limit, the host aside */
+         if (dopo_request.players > 1)
+            settings->uints.netplay_max_connections = dopo_request.players - 1;
          settings->bools.netplay_public_announce = false;
          settings->bools.netplay_use_mitm_server = false;
          settings->bools.netplay_nat_traversal   = false;

@@ -60,6 +60,7 @@ struct dopo_netplay_room
    bool        listed;    /* announced in the lobby */
    const char *relay;     /* relay handle (saopaulo, nyc, madrid,
                            * singapore), NULL or "" for none */
+   unsigned    max_players; /* host included; 0: the frontend's default */
 };
 
 struct dopo_netplay_join

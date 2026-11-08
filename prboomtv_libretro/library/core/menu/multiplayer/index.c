@@ -77,24 +77,6 @@ void dopo_multiplayer_open(int choice)
 }
 
 /**
- * @brief Episodes and maps per episode of the running game; Hexen only
- * offers its first map for now.
- */
-static void dopo_lobby_levels(int *episodes, int *maps)
-{
-  if (hexen)
-    *episodes = 1, *maps = 1;
-  else if (gamemode == commercial)
-    *episodes = 1, *maps = 32;
-  else if (gamemode == shareware)
-    *episodes = 1, *maps = 9;
-  else if (heretic)
-    *episodes = gamemode == retail ? 5 : 3, *maps = 9;
-  else
-    *episodes = gamemode == retail ? 4 : 3, *maps = 9;
-}
-
-/**
  * @brief Item routines change a copy of the setup and send it; only the
  * host may.
  */
@@ -115,7 +97,16 @@ static void dopo_lobby_mode(int choice)
 
   if (dopo_lobby_edit(&c))
   {
-    c.mode = (c.mode + (choice ? 1 : 2)) % 3;
+    int k;
+
+    /* only the modes some map of the wads is for */
+    for (k = 0; k < 3; k++)
+    {
+      c.mode = (c.mode + (choice ? 1 : 2)) % 3;
+      if (dopo_mp_mode_offered(c.mode))
+        break;
+    }
+    dopo_mp_levels_fit(&c);
     dopo_mp_set_config(&c);
   }
 }
@@ -132,20 +123,15 @@ static void dopo_lobby_skill(int choice)
 }
 
 /**
- * @brief Next or previous level, going through the episodes in order.
+ * @brief Next or previous map of the wads that takes the mode.
  */
 static void dopo_lobby_level(int choice)
 {
   dopo_mp_config_t c;
-  int episodes, maps, i;
 
   if (!dopo_lobby_edit(&c))
     return;
-  dopo_lobby_levels(&episodes, &maps);
-  i = ((c.episode - 1) * maps + c.map - 1) % (episodes * maps);
-  i = (i + (choice ? 1 : episodes * maps - 1)) % (episodes * maps);
-  c.episode = i / maps + 1;
-  c.map = i % maps + 1;
+  dopo_mp_levels_step(&c, choice ? 1 : -1);
   dopo_mp_set_config(&c);
 }
 
@@ -197,15 +183,35 @@ static void dopo_lobby_draw(void)
   dopo_menu_value(&dopo_lobby_def, 1, skills[c->skill % 5], CR_GOLD);
   dopo_menu_value(&dopo_lobby_def, 2, level, CR_GOLD);
 
+  /* the players in, as many rows as fit above the footer */
   y = dopo_lobby_def.y + LINEHEIGHT * dopo_lobby_def.numitems + 6;
-  for (i = 0; i < MAXPLAYERS; i++, y += DOPO_MENU_SMALL_LINE + 1)
   {
+    const int avail = (200 - 16 - y) / (DOPO_MENU_SMALL_LINE + 1) - 1;
+    int in = 0, shown = 0, fit;
     char line[32];
 
-    snprintf(line, sizeof(line), "%d  %s%s", i + 1,
-             slots[i].used ? slots[i].name : "-",
-             i == 0 && slots[i].used ? "  (HOST)" : "");
-    M_WriteText(DOPO_MENU_LEFT, y, line, i == self ? CR_GREEN : CR_DEFAULT);
+    for (i = 0; i < MAXPLAYERS; i++)
+      in += slots[i].used;
+    fit = in > avail ? avail - 1 : in;
+    snprintf(line, sizeof(line), "PLAYERS %d/%d", in, c->players);
+    M_WriteText(DOPO_MENU_LEFT, y, line, CR_GOLD);
+    y += DOPO_MENU_SMALL_LINE + 1;
+    for (i = 0; i < MAXPLAYERS; i++)
+    {
+      if (!slots[i].used)
+        continue;
+      if (shown++ == fit)
+      {
+        snprintf(line, sizeof(line), "+%d MORE", in - fit);
+        M_WriteText(DOPO_MENU_LEFT, y, line, CR_GRAY);
+        y += DOPO_MENU_SMALL_LINE + 1;
+        break;
+      }
+      snprintf(line, sizeof(line), "%d  %s%s", i + 1, slots[i].name,
+               i == 0 ? "  (HOST)" : "");
+      M_WriteText(DOPO_MENU_LEFT, y, line, i == self ? CR_GREEN : CR_DEFAULT);
+      y += DOPO_MENU_SMALL_LINE + 1;
+    }
   }
 
   if (!dopo_mp_is_host())

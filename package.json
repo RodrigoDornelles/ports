@@ -1,0 +1,22 @@
+{
+  "name": "dornelles-ports",
+  "private": true,
+  "description": "What the ports take from npm: files the web build copies from node_modules, the Supabase CLI for the netplay lobby, and the netplay test; the builds themselves are CMake",
+  "scripts": {
+    "test": "node dopo/tests/netplay.mjs",
+    "test:lobby": "node dopo/tests/netplay.mjs --real",
+    "lobby:login": "supabase login",
+    "lobby:link": "supabase link --workdir dopo --project-ref $(node -p \"require('./dopo/supabase/lobby.json').project\")",
+    "lobby:db": "supabase db push --workdir dopo --remote",
+    "lobby:deploy": "supabase functions deploy lobby --workdir dopo --no-verify-jwt --use-api"
+  },
+  "dependencies": {
+    "gamepadzilla": "1.2.0",
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "node-datachannel": "0.33.6",
+    "supabase": "3.0.0",
+    "ws": "8.22.1"
+  }
+}
