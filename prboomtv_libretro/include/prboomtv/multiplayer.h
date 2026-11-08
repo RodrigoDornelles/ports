@@ -79,10 +79,11 @@ typedef struct
   int skill;   /* skill_t */
   int episode; /* 1 on games without episodes */
   int map;
+  int players; /* the room's limit, 2 to MAXPLAYERS */
 } dopo_mp_config_t;
 
 /**
- * @brief A player slot (player 1 to 4); slot 0 is always the host.
+ * @brief A player slot (player 1 to MAXPLAYERS); slot 0 is always the host.
  */
 typedef struct
 {

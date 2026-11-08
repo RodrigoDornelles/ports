@@ -34,7 +34,8 @@ typedef enum
   DOPO_MP_PING,      /* host to a client, echoed back: round trip time */
   DOPO_MP_PINGS,     /* host to all: every player's ping */
   DOPO_MP_TELEPORT,  /* host to all: a player goes next to another at a tic */
-  DOPO_MP_REJECT     /* host to a client: other core version (the host's) */
+  DOPO_MP_REJECT,    /* host to a client: other core version (the host's) */
+  DOPO_MP_TICS       /* host to all: the ticcmds of a frame, slot and tic each */
 } dopo_mp_packet_t;
 
 /** @brief Longest core version in a packet, without the terminator. */

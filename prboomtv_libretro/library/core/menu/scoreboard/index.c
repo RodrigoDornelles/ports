@@ -98,6 +98,9 @@ static void dopo_score_draw(void)
 {
   const dopo_mp_slot_t *slots = dopo_mp_slots();
   const int self = dopo_mp_self_slot();
+  /* the rows that fit, scrolled to keep the selection in view */
+  const int visible = (200 - 4 - DOPO_SCORE_ROW_Y) / DOPO_SCORE_ROW;
+  const int top = itemOn >= visible ? itemOn - visible + 1 : 0;
   int row;
 
   if (dopo_mp_state() != DOPO_MP_GAME)
@@ -112,10 +115,10 @@ static void dopo_score_draw(void)
   dopo_score_right(DOPO_SCORE_KD_R, DOPO_SCORE_HEAD_Y, "K/D", CR_GOLD);
   dopo_score_right(DOPO_SCORE_PING_R, DOPO_SCORE_HEAD_Y, "PING", CR_GOLD);
 
-  for (row = 0; row < dopo_scoreboard_def.numitems; row++)
+  for (row = top; row < dopo_scoreboard_def.numitems && row < top + visible; row++)
   {
     const int slot = dopo_score_slots[row];
-    const int y = DOPO_SCORE_ROW_Y + row * DOPO_SCORE_ROW;
+    const int y = DOPO_SCORE_ROW_Y + (row - top) * DOPO_SCORE_ROW;
     const int cm = row == itemOn ? CR_GOLD : slot == self ? CR_GREEN : CR_DEFAULT;
     char name[DOPO_MP_NAME + 16], kd[16], ping[16];
 

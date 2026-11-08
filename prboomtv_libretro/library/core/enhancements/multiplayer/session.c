@@ -16,15 +16,17 @@
 #include "lprintf.h"
 #include "prboomtv/cheats.h"
 #include "prboomtv/multiplayer.h"
+#include "prboomtv/rooms.h"
 #include "prboomtv/version.h"
 
 void M_StartMessage(const char *string, void *routine, dbool input);
 void M_ClearMenus(void);
 extern dbool quit_pressed;
 
-/* START: type, complevel, mode, skill, episode, map, players, cheats,
- * then the G_WriteOptions block */
-#define DOPO_START_CHEATS  7
+/* START: type, complevel, mode, skill, episode, map, players (a bit per
+ * slot), cheats, then the G_WriteOptions block */
+#define DOPO_START_PLAYERS 6
+#define DOPO_START_CHEATS  10
 #define DOPO_CHEATS_SIZE   7
 #define DOPO_START_OPTIONS (DOPO_START_CHEATS + DOPO_CHEATS_SIZE)
 #define DOPO_START_SIZE    (DOPO_START_OPTIONS + GAME_OPTION_SIZE)
@@ -32,6 +34,10 @@ extern dbool quit_pressed;
 /* TIC: type, tic, slot, then the ticcmd */
 #define DOPO_TIC_CMD  6
 #define DOPO_TIC_SIZE (DOPO_TIC_CMD + 10)
+
+/* TICS: type, count, then count times what follows a TIC's type */
+#define DOPO_TICS_ENTRY (DOPO_TIC_SIZE - 1)
+#define DOPO_TICS_MAX   255
 
 /* HELLO: type, name, core version; REJECT: type, the host's version */
 #define DOPO_HELLO_VERSION (1 + DOPO_MP_NAME + 1)
@@ -61,7 +67,7 @@ static dopo_mp_state_t  dopo_state;
 static uint16_t         dopo_self;
 static dopo_mp_send_t   dopo_send;
 static dopo_mp_slot_t   dopo_slots[MAXPLAYERS];
-static dopo_mp_config_t dopo_config = { DOPO_MP_COOP, sk_medium, 1, 1 };
+static dopo_mp_config_t dopo_config = { DOPO_MP_COOP, sk_medium, 1, 1, 4 };
 
 static dbool   dopo_start_pending;
 static uint8_t dopo_start_packet[DOPO_START_SIZE];
@@ -215,13 +221,14 @@ static void dopo_send_roster(void)
 
 static void dopo_send_config(void)
 {
-  uint8_t p[5];
+  uint8_t p[6];
 
   p[0] = DOPO_MP_CONFIG;
   p[1] = (uint8_t)dopo_config.mode;
   p[2] = (uint8_t)dopo_config.skill;
   p[3] = (uint8_t)dopo_config.episode;
   p[4] = (uint8_t)dopo_config.map;
+  p[5] = (uint8_t)dopo_config.players;
   dopo_send(DOPO_MP_ALL, p, sizeof(p));
 }
 
@@ -462,6 +469,7 @@ void dopo_mp_start_game(void)
 static void dopo_build_start(void)
 {
   uint8_t *p = dopo_start_packet;
+  unsigned long players = 0;
   int i;
 
   G_ReloadDefaults();
@@ -474,7 +482,8 @@ static void dopo_build_start(void)
   p[5] = (uint8_t)dopo_config.map;
   for (i = 0; i < MAXPLAYERS; i++)
     if (dopo_slots[i].used)
-      p[6] |= 1 << i;
+      players |= 1UL << i;
+  dopo_put32(p + DOPO_START_PLAYERS, players);
   dopo_put_cheats(p + DOPO_START_CHEATS, dopo_cheats_wanted());
   G_WriteOptions(p + DOPO_START_OPTIONS);
 }
@@ -485,10 +494,11 @@ static void dopo_build_start(void)
 static void dopo_begin_game(const uint8_t *p)
 {
   const int self = dopo_mp_self_slot();
+  const unsigned long players = dopo_get32(p + DOPO_START_PLAYERS);
   dopo_cheats_t cheats;
   int i;
 
-  if (self < 0 || !(p[6] & (1 << self)))
+  if (self < 0 || !((players >> self) & 1))
     return;
 
   G_ReloadDefaults();  /* also stops the title demos */
@@ -498,7 +508,7 @@ static void dopo_begin_game(const uint8_t *p)
   netgame = TRUE;
   deathmatch = p[2];
   for (i = 0; i < MAXPLAYERS; i++)
-    playeringame[i] = (p[6] >> i) & 1;
+    playeringame[i] = (players >> i) & 1;
   consoleplayer = displayplayer = self;
 
   dopo_get_cheats(p + DOPO_START_CHEATS, &cheats);
@@ -555,6 +565,25 @@ void dopo_mp_frame(void)
   dopo_begin_game(dopo_start_packet);
 }
 
+/* Host: the ticcmds for everyone go out together, one TICS a frame or two,
+ * not one packet per player per client */
+static uint8_t dopo_tics[2 + DOPO_TICS_MAX * DOPO_TICS_ENTRY] = { DOPO_MP_TICS };
+
+static void dopo_tics_flush(void)
+{
+  if (!dopo_tics[1] || !dopo_send)
+    return;
+  dopo_send(DOPO_MP_ALL, dopo_tics, 2 + dopo_tics[1] * DOPO_TICS_ENTRY);
+  dopo_tics[1] = 0;
+}
+
+static void dopo_tics_add(const uint8_t *entry)
+{
+  memcpy(dopo_tics + 2 + dopo_tics[1] * DOPO_TICS_ENTRY, entry, DOPO_TICS_ENTRY);
+  if (++dopo_tics[1] == DOPO_TICS_MAX)
+    dopo_tics_flush();
+}
+
 void dopo_mp_send_tic(int slot, int tic, const ticcmd_t *cmd)
 {
   uint8_t p[DOPO_TIC_SIZE];
@@ -565,7 +594,13 @@ void dopo_mp_send_tic(int slot, int tic, const ticcmd_t *cmd)
   dopo_put32(p + 1, (unsigned long)tic);
   p[5] = (uint8_t)slot;
   dopo_put_cmd(p + DOPO_TIC_CMD, cmd);
-  dopo_send(dopo_mp_is_host() ? DOPO_MP_ALL : DOPO_MP_HOST, p, sizeof(p));
+  if (!dopo_mp_is_host())
+  {
+    dopo_send(DOPO_MP_HOST, p, sizeof(p));
+    return;
+  }
+  dopo_tics_add(p + 1);
+  dopo_tics_flush();
 }
 
 void dopo_mp_send_cheats(int tic)
@@ -594,7 +629,10 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
   dopo_state = DOPO_MP_LOBBY;
   dopo_start_pending = FALSE;
   dopo_rejected_count = 0;
+  dopo_tics[1] = 0;
   dopo_config.skill = defaultskill - 1;
+  if (self == DOPO_MP_HOST)
+    dopo_config.players = dopo_rooms_limit();
   lprintf(LO_INFO, "dopo_mp: session started as %s (client %u)\n",
           self == DOPO_MP_HOST ? "host" : "client", self);
 
@@ -629,10 +667,14 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
  */
 static int dopo_host_join(uint16_t client)
 {
-  int i = dopo_slot_of(client);
+  int i = dopo_slot_of(client), used = 0;
 
   if (i >= 0 || dopo_state != DOPO_MP_LOBBY)
     return i;
+  for (i = 0; i < MAXPLAYERS; i++)
+    used += dopo_slots[i].used;
+  if (used >= dopo_config.players)
+    return -1;
   for (i = 0; i < MAXPLAYERS; i++)
     if (!dopo_slots[i].used)
     {
@@ -778,12 +820,13 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
       break;
 
     case DOPO_MP_CONFIG:
-      if (!host && len >= 5)
+      if (!host && len >= 6)
       {
         dopo_config.mode    = p[1];
         dopo_config.skill   = p[2];
         dopo_config.episode = p[3];
         dopo_config.map     = p[4];
+        dopo_config.players = p[5];
       }
       break;
 
@@ -810,15 +853,25 @@ void dopo_mp_on_receive(const void *buf, size_t len, uint16_t from)
 
         if (host)
         {
-          uint8_t relay[DOPO_TIC_SIZE];
+          uint8_t entry[DOPO_TICS_ENTRY];
 
-          memcpy(relay, p, DOPO_TIC_SIZE);
-          relay[5] = (uint8_t)slot;
-          for (i = 1; i < MAXPLAYERS; i++)
-            if (dopo_slots[i].used && dopo_slots[i].client != from)
-              dopo_send(dopo_slots[i].client, relay, sizeof(relay));
+          memcpy(entry, p + 1, DOPO_TICS_ENTRY);
+          entry[4] = (uint8_t)slot;
+          dopo_tics_add(entry);
         }
       }
+      break;
+
+    case DOPO_MP_TICS:
+      if (!host && len >= 2 && len >= 2 + (size_t)p[1] * DOPO_TICS_ENTRY)
+        for (i = 0; i < p[1]; i++)
+        {
+          const uint8_t *entry = p + 2 + i * DOPO_TICS_ENTRY;
+          ticcmd_t cmd;
+
+          dopo_get_cmd(entry + DOPO_TIC_CMD - 1, &cmd);
+          dopo_mp_lockstep_store(entry[4], (int)dopo_get32(entry), &cmd);
+        }
       break;
 
     case DOPO_MP_CHEATS:
@@ -910,9 +963,12 @@ void dopo_mp_on_poll(void)
 {
   static int frames;
 
-  if (dopo_state != DOPO_MP_OFF && dopo_mp_is_host() &&
-      ++frames % DOPO_PING_FRAMES == 0)
-    dopo_host_ping();
+  if (dopo_state != DOPO_MP_OFF && dopo_mp_is_host())
+  {
+    dopo_tics_flush();
+    if (++frames % DOPO_PING_FRAMES == 0)
+      dopo_host_ping();
+  }
   if (dopo_state == DOPO_MP_LOBBY && !menuactive)
     dopo_lobby_open();
 }

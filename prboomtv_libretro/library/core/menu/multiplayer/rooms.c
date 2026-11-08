@@ -74,11 +74,19 @@ static const char *const dopo_relay_names[] = { "OFF", "SAO PAULO", "NEW YORK", 
 #endif
 
 static dbool dopo_create_listed = TRUE;
+static int   dopo_create_players = 4;
 static int   dopo_create_relay = DOPO_CREATE_RELAYS;  /* Sao Paulo; none in the browser */
 
 static void dopo_create_toggle_listed(int choice)
 {
   dopo_create_listed = !dopo_create_listed;
+}
+
+static void dopo_create_cycle_players(int choice)
+{
+  static const int steps[] = { 2, 3, 4, 6, 8, 12, 16, 24, MAXPLAYERS };
+
+  dopo_menu_cycle(&dopo_create_players, steps, sizeof(steps) / sizeof(*steps), choice);
 }
 
 #if DOPO_CREATE_RELAYS
@@ -93,7 +101,8 @@ static void dopo_create_cycle_relay(int choice)
 /** @brief Hosts the room; the lobby opens once the session starts. */
 static void dopo_create_go(int choice)
 {
-  dopo_rooms_create(dopo_create_listed, dopo_relay_handles[dopo_create_relay]);
+  dopo_rooms_create(dopo_create_listed, dopo_relay_handles[dopo_create_relay],
+                    dopo_create_players);
   M_ClearMenus();
 }
 
@@ -102,6 +111,7 @@ static void dopo_create_draw(void);
 static menuitem_t dopo_create_items[] =
 {
   {1, "", dopo_create_toggle_listed, 'p', "Public"},
+  {2, "", dopo_create_cycle_players, 'l', "Players"},
 #if DOPO_CREATE_RELAYS
   {2, "", dopo_create_cycle_relay,   'r', "Relay"},
 #endif
@@ -124,12 +134,15 @@ static void dopo_create_draw(void)
 {
   static const dbool *const values[] = { &dopo_create_listed };
   const int below = dopo_create_def.y + LINEHEIGHT * (int)DOPO_CREATE_ITEMS + 8;
+  char players[8];
 
   dopo_menu_big(&dopo_create_def);
   dopo_menu_title("CREATE LOBBY");
   dopo_menu_toggles(&dopo_create_def, values, 1);
+  snprintf(players, sizeof(players), "%d", dopo_create_players);
+  dopo_menu_value(&dopo_create_def, 1, players, CR_GOLD);
 #if DOPO_CREATE_RELAYS
-  dopo_menu_value(&dopo_create_def, 1, dopo_relay_names[dopo_create_relay], CR_GOLD);
+  dopo_menu_value(&dopo_create_def, 2, dopo_relay_names[dopo_create_relay], CR_GOLD);
   dopo_menu_small_centered(below,
                            dopo_create_listed ? "LISTED IN THE LOBBY" : "NOT LISTED: SHARE THE RELAY SESSION",
                            CR_GRAY);

@@ -75,9 +75,15 @@ const dopo_room_t *dopo_rooms_get(int i);
 
 /**
  * @brief Hosts a room for the running game: listed in the lobby or not,
- * through a relay (its handle) or straight (NULL).
+ * through a relay (its handle) or straight (NULL), for up to players.
  */
-void dopo_rooms_create(dbool listed, const char *relay);
+void dopo_rooms_create(dbool listed, const char *relay, int players);
+
+/**
+ * @brief The most players the room hosted last takes (MAXPLAYERS before
+ * any): the session's limit when this machine hosts.
+ */
+int dopo_rooms_limit(void);
 
 /**
  * @brief Joins a room, switching to its game first when it is another;

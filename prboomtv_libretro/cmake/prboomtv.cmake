@@ -348,29 +348,24 @@ endif()
 file(COPY_FILE "${CMAKE_BINARY_DIR}/prboomtv/gpu/gldefs.h"
     "${PRBOOMTV_INCLUDE_GENERATED}/prboomtv/gpu/gldefs.h" ONLY_IF_DIFFERENT)
 
-set(PRBOOMTV_PATCHS_OUTPUT "${CMAKE_BINARY_DIR}/prboomtv/patchs")
-dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_PATCHS_OUTPUT}" ${prboomtv_patch_files})
-
-set(prboomtv_files "")
-set(prboomtv_patched_dirs "")
+# the core builds from a copy of upstream with the patched files over it,
+# so a patched header reaches every file that includes it
+set(PRBOOMTV_TREE "${CMAKE_BINARY_DIR}/prboomtv/tree")
+dopo_apply_patchs(prboomtv_patched_files "${PRBOOM_DIR}" "${PRBOOMTV_TREE}" TREE ${prboomtv_patch_files})
 foreach(file ${prboomtv_patched_files})
-    if (NOT file IN_LIST prboomtv_upstream_files)
+    if (NOT file IN_LIST prboomtv_upstream_files AND NOT file MATCHES "\\.(h|inl)$")
         message(FATAL_ERROR "prboomtv: ${file} is patched but is not compiled by the core")
     elseif (file IN_LIST prboomtv_override_files)
         message(FATAL_ERROR "prboomtv: ${file} is both patched and replaced in library/core/")
     endif()
-    # the patched copy lives in the build tree, so its quoted includes need
-    # the original directory to keep resolving like upstream
-    get_filename_component(dir "${PRBOOM_DIR}/${file}" DIRECTORY)
-    list(APPEND prboomtv_patched_dirs "${dir}")
 endforeach()
+
+set(prboomtv_files "")
 foreach(file ${prboomtv_upstream_files})
     if (file IN_LIST prboomtv_override_files)
         list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
-    elseif (file IN_LIST prboomtv_patched_files)
-        list(APPEND prboomtv_files "${PRBOOMTV_PATCHS_OUTPUT}/${file}")
     else()
-        list(APPEND prboomtv_files "${PRBOOM_DIR}/${file}")
+        list(APPEND prboomtv_files "${PRBOOMTV_TREE}/${file}")
     endif()
 endforeach()
 foreach(file ${prboomtv_override_files})
@@ -378,7 +373,6 @@ foreach(file ${prboomtv_override_files})
         list(APPEND prboomtv_files "${PRBOOMTV_DIR}/library/core/${file}")
     endif()
 endforeach()
-list(REMOVE_DUPLICATES prboomtv_patched_dirs)
 
 if (EMSCRIPTEN)
     add_library(prboomtv_libretro STATIC "${prboomtv_files}")
@@ -388,9 +382,9 @@ endif()
 target_include_directories(prboomtv_libretro BEFORE PRIVATE "${PRBOOMTV_DIR}/include" "${CMAKE_SOURCE_DIR}/dopo/include"
     "${PRBOOMTV_INCLUDE_GENERATED}")
 target_include_directories(prboomtv_libretro SYSTEM PRIVATE
-    "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro"
-    "${PRBOOM_DIR}/libretro/libretro-common/include" ${prboomtv_patched_dirs}
-    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}" "${PRBOOM_DIR}/deps/fluidlite/include")
+    "${PRBOOMTV_TREE}" "${PRBOOMTV_TREE}/src" "${PRBOOMTV_TREE}/libretro"
+    "${PRBOOMTV_TREE}/libretro/libretro-common/include"
+    "${PRBOOMTV_GENERATED}" "${JSMN_DIR}" "${PRBOOMTV_TREE}/deps/fluidlite/include")
 target_compile_definitions(prboomtv_libretro PRIVATE
     HAVE_RVORBIS HAVE_RMP3 HAVE_RMODTRACKER HAVE_RWAV HAVE_RPNG HAVE_RJPEG HAVE_LIBFLUIDSYNTH
     INLINE=inline _POSIX_C_SOURCE=199309L _DEFAULT_SOURCE
@@ -485,20 +479,19 @@ if (EMSCRIPTEN)
         "${PRBOOMTV_DIR}/library/music/music.c"
         "${PRBOOMTV_DIR}/library/music/opl.c"
         "${PRBOOMTV_DIR}/library/music/fluid.c"
-        "${PRBOOM_DIR}/src/opl.c"
-        "${PRBOOM_DIR}/src/dbopl.c"
-        "${PRBOOM_DIR}/src/opl_queue.c"
-        "${PRBOOM_DIR}/src/midifile.c"
-        "${PRBOOM_DIR}/src/mus2mid.c"
-        "${PRBOOM_DIR}/src/memio.c"
-        "${PRBOOM_DIR}/libretro/libretro-common/formats/vorbis/rvorbis.c"
-        "${PRBOOM_DIR}/libretro/libretro-common/encodings/encoding_crc32.c"
+        "${PRBOOMTV_TREE}/src/opl.c"
+        "${PRBOOMTV_TREE}/src/dbopl.c"
+        "${PRBOOMTV_TREE}/src/opl_queue.c"
+        "${PRBOOMTV_TREE}/src/midifile.c"
+        "${PRBOOMTV_TREE}/src/mus2mid.c"
+        "${PRBOOMTV_TREE}/src/memio.c"
+        "${PRBOOMTV_TREE}/libretro/libretro-common/formats/vorbis/rvorbis.c"
+        "${PRBOOMTV_TREE}/libretro/libretro-common/encodings/encoding_crc32.c"
         ${prboomtv_music_files})
-    # fluid.c includes the patched flplayer.c, found before upstream's
-    target_include_directories(prboomtv_music BEFORE PRIVATE "${PRBOOMTV_PATCHS_OUTPUT}/src")
+    # fluid.c includes the patched flplayer.c of the tree
     target_include_directories(prboomtv_music SYSTEM PRIVATE
-        "${PRBOOM_DIR}" "${PRBOOM_DIR}/src" "${PRBOOM_DIR}/libretro/libretro-common/include"
-        "${PRBOOM_DIR}/deps/fluidlite/include" "${PRBOOM_DIR}/deps/fluidlite/src")
+        "${PRBOOMTV_TREE}" "${PRBOOMTV_TREE}/src" "${PRBOOMTV_TREE}/libretro/libretro-common/include"
+        "${PRBOOMTV_TREE}/deps/fluidlite/include" "${PRBOOMTV_TREE}/deps/fluidlite/src")
     target_compile_definitions(prboomtv_music PRIVATE INLINE=inline _DEFAULT_SOURCE HAVE_LIBFLUIDSYNTH)
     set_target_properties(prboomtv_music PROPERTIES
         C_STANDARD 99

@@ -197,15 +197,35 @@ static void dopo_lobby_draw(void)
   dopo_menu_value(&dopo_lobby_def, 1, skills[c->skill % 5], CR_GOLD);
   dopo_menu_value(&dopo_lobby_def, 2, level, CR_GOLD);
 
+  /* the players in, as many rows as fit above the footer */
   y = dopo_lobby_def.y + LINEHEIGHT * dopo_lobby_def.numitems + 6;
-  for (i = 0; i < MAXPLAYERS; i++, y += DOPO_MENU_SMALL_LINE + 1)
   {
+    const int avail = (200 - 16 - y) / (DOPO_MENU_SMALL_LINE + 1) - 1;
+    int in = 0, shown = 0, fit;
     char line[32];
 
-    snprintf(line, sizeof(line), "%d  %s%s", i + 1,
-             slots[i].used ? slots[i].name : "-",
-             i == 0 && slots[i].used ? "  (HOST)" : "");
-    M_WriteText(DOPO_MENU_LEFT, y, line, i == self ? CR_GREEN : CR_DEFAULT);
+    for (i = 0; i < MAXPLAYERS; i++)
+      in += slots[i].used;
+    fit = in > avail ? avail - 1 : in;
+    snprintf(line, sizeof(line), "PLAYERS %d/%d", in, c->players);
+    M_WriteText(DOPO_MENU_LEFT, y, line, CR_GOLD);
+    y += DOPO_MENU_SMALL_LINE + 1;
+    for (i = 0; i < MAXPLAYERS; i++)
+    {
+      if (!slots[i].used)
+        continue;
+      if (shown++ == fit)
+      {
+        snprintf(line, sizeof(line), "+%d MORE", in - fit);
+        M_WriteText(DOPO_MENU_LEFT, y, line, CR_GRAY);
+        y += DOPO_MENU_SMALL_LINE + 1;
+        break;
+      }
+      snprintf(line, sizeof(line), "%d  %s%s", i + 1, slots[i].name,
+               i == 0 ? "  (HOST)" : "");
+      M_WriteText(DOPO_MENU_LEFT, y, line, i == self ? CR_GREEN : CR_DEFAULT);
+      y += DOPO_MENU_SMALL_LINE + 1;
+    }
   }
 
   if (!dopo_mp_is_host())

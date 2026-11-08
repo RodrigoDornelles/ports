@@ -2,7 +2,7 @@
 ## retroarch, lua games), so a change does not need a full copy of the file
 ## it touches.
 ##
-## usage: patchs --source <upstream dir> --output <dir> <patch>...
+## usage: patchs --source <upstream dir> --output <dir> [--tree] <patch>...
 ##
 ## A patch file holds one or more hunks. In C (every patch but *.lua) they
 ## are written in documentation notation:
@@ -35,6 +35,10 @@
 ##
 ## A comment may instead list files to drop from the tree, "@delete <file>"
 ## each, which only the browser's entry point (dopoPatchs) can do.
+##
+## With --tree, <output> is a whole copy of the source with the patched files
+## over it, so a patched header reaches every file that includes it; a file
+## is only rewritten when its text changes, so builds redo only what did.
 ##
 ## Every patched file is written to <output>/<path>, the C ones with #line
 ## markers that point back to the upstream file and to the patch, so
@@ -496,6 +500,7 @@ when isMainModule and not defined(js):
   proc main() =
     var source, output: string
     var patches: seq[string]
+    var tree = false
 
     let args = commandLineParams()
     var i = 0
@@ -504,13 +509,15 @@ when isMainModule and not defined(js):
       if arg in ["--source", "--output"] and i + 1 < args.len:
         inc i
         if arg == "--source": source = args[i] else: output = args[i]
+      elif arg == "--tree":
+        tree = true
       elif arg.startsWith("--"):
         fail "error: unknown option '" & arg & "'"
       else:
         patches.add absolutePath(arg)
       inc i
     if source.len == 0 or output.len == 0:
-      fail "usage: patchs --source <upstream dir> --output <dir> <patch>..."
+      fail "usage: patchs --source <upstream dir> --output <dir> [--tree] <patch>..."
 
     # deterministic order no matter how the shell or cmake listed them
     patches.sort()
@@ -536,6 +543,15 @@ when isMainModule and not defined(js):
       writeChanged(destination, apply(original, target, lines, list, lineEnding(text)))
       generated.incl destination
       stdout.writeLine target
+
+    if tree:
+      for path in walkDirRec(source, relative = true):
+        if path.startsWith(".git" & DirSep):
+          continue
+        let destination = output / path
+        if destination notin generated:
+          writeChanged(destination, load(source / path))
+          generated.incl destination
 
     removeStale(output, generated)
 

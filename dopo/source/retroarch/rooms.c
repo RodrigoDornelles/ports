@@ -41,6 +41,7 @@ static struct
    char     host[256];
    char     game[128];
    unsigned port;
+   unsigned players;
    bool     listed;
 } dopo_request;
 
@@ -73,6 +74,7 @@ static bool dopo_environment(unsigned cmd, void *data)
             dopo_request.kind   = DOPO_REQUEST_HOST;
             dopo_request.port   = room->port ? room->port : 55435;
             dopo_request.listed = room->listed;
+            dopo_request.players = room->max_players;
             strlcpy(dopo_request.game, room->game_name ? room->game_name : "",
                   sizeof(dopo_request.game));
          }
@@ -107,6 +109,9 @@ static void dopo_requests(void)
       case DOPO_REQUEST_HOST:
          /* announced by rooms.js to the page's lobby, never by RetroArch to libretro's */
          settings->uints.netplay_port            = dopo_request.port;
+         /* the room's limit, the host aside */
+         if (dopo_request.players > 1)
+            settings->uints.netplay_max_connections = dopo_request.players - 1;
          settings->bools.netplay_public_announce = false;
          settings->bools.netplay_use_mitm_server = false;
          settings->bools.netplay_nat_traversal   = false;
