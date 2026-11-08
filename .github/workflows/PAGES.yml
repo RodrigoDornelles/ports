@@ -21,6 +21,9 @@ jobs:
     steps:
       - 
         uses: actions/checkout@master
+      -
+        run: |
+          npm install
       - 
         run: |
           cmake --preset wasm
