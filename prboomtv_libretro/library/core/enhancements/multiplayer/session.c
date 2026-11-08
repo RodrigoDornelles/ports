@@ -437,6 +437,7 @@ void dopo_mp_set_config(const dopo_mp_config_t *config)
   if (dopo_state == DOPO_MP_OFF || !dopo_mp_is_host())
     return;
   dopo_config = *config;
+  dopo_mp_levels_fit(&dopo_config);
   dopo_send_config();
 }
 
@@ -632,7 +633,10 @@ void dopo_mp_on_start(uint16_t self, const char *name, dopo_mp_send_t send)
   dopo_tics[1] = 0;
   dopo_config.skill = defaultskill - 1;
   if (self == DOPO_MP_HOST)
+  {
     dopo_config.players = dopo_rooms_limit();
+    dopo_mp_levels_fit(&dopo_config);
+  }
   lprintf(LO_INFO, "dopo_mp: session started as %s (client %u)\n",
           self == DOPO_MP_HOST ? "host" : "client", self);
 

@@ -247,6 +247,34 @@ int dopo_mp_lockstep_received(int slot);
 void dopo_mp_consistancy_reset(void);
 
 /* ------------------------------------------------------------------ */
+/* Levels (enhancements/multiplayer/levels.c)                          */
+/* ------------------------------------------------------------------ */
+
+/** @brief A map of the loaded wads and the modes its starts are for. */
+typedef struct
+{
+  int   episode;
+  int   map;
+  dbool coop;
+  dbool dm;
+} dopo_mp_level_t;
+
+/** @brief The maps of the loaded wads in order (Hexen: its first). */
+const dopo_mp_level_t *dopo_mp_levels(int *count);
+
+/** @brief Whether some map takes the mode (coop, or either deathmatch). */
+dbool dopo_mp_mode_offered(int mode);
+
+/** @brief The next (step 1) or previous (-1) map taking the setup's mode. */
+void dopo_mp_levels_step(dopo_mp_config_t *config, int step);
+
+/**
+ * @brief Moves a setup onto what the wads offer: a mode some map takes,
+ * then a map taking it, the next one when the current does not.
+ */
+void dopo_mp_levels_fit(dopo_mp_config_t *config);
+
+/* ------------------------------------------------------------------ */
 /* Lobby menu (menu/multiplayer/index.c, in m_menu.c)                  */
 /* ------------------------------------------------------------------ */
 
