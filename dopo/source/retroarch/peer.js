@@ -395,7 +395,7 @@ mergeInto(LibraryManager.library, {
   dopo_peer_host: function(port, listed, game, nick, core, version) {
     var fields = {
       game_name: UTF8ToString(game),
-      username: UTF8ToString(nick),
+      username: UTF8ToString(nick).trim() || 'Player',
       core_name: UTF8ToString(core),
       core_version: UTF8ToString(version),
       port

@@ -240,7 +240,7 @@ export async function play({ canvas, core, content, playlist = [], nick, config 
      * the core's library name (config/<name>/<name>.opt) */
     global_core_options: 'true',
     core_options_path: CORE_OPTIONS,
-    ...(nick ? { netplay_nickname: nick } : {}),
+    netplay_nickname: String(nick ?? '').trim() || 'Player',
     ...config,
   }));
   /* only the page's options; the rest take the core's defaults */

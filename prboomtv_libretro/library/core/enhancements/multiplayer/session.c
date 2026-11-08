@@ -193,8 +193,10 @@ static void dopo_set_name(int slot, const char *name, size_t len)
   size_t i, n = 0;
 
   for (i = 0; name && i < len && name[i] && n < DOPO_MP_NAME; i++)
-    if (name[i] >= ' ' && name[i] <= '~')
+    if (name[i] >= ' ' && name[i] <= '~' && (n || name[i] != ' '))
       out[n++] = name[i];
+  while (n && out[n - 1] == ' ')
+    n--;
   out[n] = '\0';
   if (!n)
     snprintf(out, DOPO_MP_NAME + 1, "PLAYER %d", (slot + 1) & 0xFF);

@@ -99,7 +99,8 @@ async function add(req: Request) {
     updated: new Date().toISOString(),
   };
   for (const [key, max] of Object.entries(TEXT))
-    if (fields[key] !== undefined) row[key] = fields[key].slice(0, max);
+    if (fields[key] !== undefined) row[key] = fields[key].trim().slice(0, max);
+  if (!row.username) row.username = "Player";
   if (fields.mitm_custom_addr) {
     row.mitm_ip = fields.mitm_custom_addr.slice(0, 64);
     row.mitm_port = int(fields.mitm_custom_port, 0, 65535);
