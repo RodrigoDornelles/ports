@@ -36,6 +36,7 @@ const CORE_OPTIONS = `${HOME}/core-options.cfg`;
 const DEFAULTS = {
   menu_driver: 'rgui',
   pause_nonactive: 'false', /* a netgame stalls when a tab pauses */
+  video_font_enable: 'false', /* RetroArch's notifications: the core has its own */
   config_save_on_exit: 'true',
   netplay_nat_traversal: 'false',
   netplay_use_mitm_server: 'false',
