@@ -29,6 +29,7 @@ template cenario*: untyped = at(Byte, 0x4b44d8)          ## Cenarios/Cenario-n.b
 template niveljogo*: untyped = at(Byte, 0x4b44d9)        ## Nível do Jogo, 1 to 8
 template creditos*: untyped = at(Byte, 0x4b44da)
 template rounds*: untyped = at(Byte, 0x4b44dc)           ## 1 to 3
+template etapa*: untyped = at(Byte, 0x4b44dd)            ## the one player ladder's fight, 1 to 8
 template sangue*: untyped = at(Byte, 0x4b44e1)
 template tempo*: untyped = at(Byte, 0x4b44e3)         ## seconds of the countdown on screen
 template quadros*: untyped = at(Byte, 0x4b44e4)       ## frames left of its second, 25

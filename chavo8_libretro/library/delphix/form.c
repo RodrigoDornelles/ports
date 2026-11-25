@@ -11,7 +11,7 @@ typedef struct {
 typedef struct {
     uint8_t *data;
     wave_t wave;
-    bool ok;
+    bool ok, looped;
 } sound_t;
 
 static struct {
@@ -60,6 +60,7 @@ static void from_dfm(void *ctx, const dfm_item_t *item)
         int i = dx_waves_add(l) - 1;
         sound_t *s = &form.waves[l].item[i];
         s->ok = item->data.data && wave_parse(item->data.data, item->data.size, &s->wave);
+        s->looped = item->looped;
         return;
     }
 }
@@ -215,6 +216,14 @@ void dx_images_draw(int list, int index, int x, int y)
         dx_draw(&form.screen, x, y, s);
 }
 
+/* Items[index].StretchDraw: a DirectDraw Blt onto the rect */
+void dx_images_stretch(int list, int index, int l, int t, int r, int b)
+{
+    const surface_t *s = dx_images_get(list, index);
+    if (s)
+        dx_draw_alpha(&form.screen, l, t, r, b, s, 255);
+}
+
 void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha)
 {
     const surface_t *s = dx_images_get(list, index);
@@ -222,12 +231,13 @@ void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int a
         dx_draw_alpha(&form.screen, l, t, r, b, s, alpha);
 }
 
-/* Items[index].Play: each call plays the wave once more, over the others */
+/* Items[index].Play: each call plays the wave once more, over the others,
+ * over and over if the item is Looped */
 void dx_waves_play(int list, int index)
 {
     const wave_t *w = dx_waves_get(list, index);
     if (w)
-        dx_play(w, false);
+        dx_play(w, form.waves[list].item[index].looped);
 }
 
 void dx_waves_stop(int list, int index)

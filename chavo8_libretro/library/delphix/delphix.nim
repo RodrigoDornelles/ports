@@ -185,6 +185,12 @@ proc Draw*(list: TDXImageList, index, x, y: Integer) =
 proc DrawAlpha*(list: TDXImageList, index: Integer, r: TRect, alpha: Integer) =
   dx_images_draw_alpha(cint(ord(list)), index, r.Left, r.Top, r.Right, r.Bottom, alpha)
 
+proc dx_images_stretch(list, index, l, t, r, b: cint) {.importc, cdecl.}
+
+## Items[index].StretchDraw(DXDraw1.Surface, rect, 0)
+proc StretchDraw*(list: TDXImageList, index: Integer, r: TRect) =
+  dx_images_stretch(cint(ord(list)), index, r.Left, r.Top, r.Right, r.Bottom)
+
 proc Play*(list: TDXWaveList, index: Integer) =
   dx_waves_play(cint(ord(list)), index)
 

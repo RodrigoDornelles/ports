@@ -62,6 +62,7 @@ surface_t *dx_screen(void);
 uint32_t form_image_pixel(int image, int x, int y);
 void dx_images_draw(int list, int index, int x, int y);
 void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha);
+void dx_images_stretch(int list, int index, int l, int t, int r, int b);
 void dx_waves_play(int list, int index);
 void dx_waves_stop(int list, int index);
 void dx_terminate(void);

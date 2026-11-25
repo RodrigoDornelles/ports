@@ -12,6 +12,13 @@ const
 
 proc linha(i: Integer): string = $Lines(MemoTexto, i)
 
+proc carregarcenarioatual() =
+  if cenario < 10: carregarcenario(numerado("Cenarios/Cenario-0", Integer(cenario), ".bmp"))
+  if cenario >= 10: carregarcenario(numerado("Cenarios/Cenario-", Integer(cenario), ".bmp"))
+
+proc lutador(c: int): string =
+  numerado(if c < 10: "Lutadores/C0" else: "Lutadores/C", c, ".bmp")
+
 proc tela0() =
   barra(0, 0, 400, 300, RGB(0, 0, 0))
   texto(200, 10, lit(0x4aeb94), 'c', 10, RGB(100, 100, 255))
@@ -154,8 +161,7 @@ proc tela1() =
     if n < 1: n := 1
     if n > 12: n := 12
     cenario := n
-    if cenario < 10: carregarcenario(numerado("Cenarios/Cenario-0", Integer(cenario), ".bmp"))
-    if cenario >= 10: carregarcenario(numerado("Cenarios/Cenario-", Integer(cenario), ".bmp"))
+    carregarcenarioatual()
     for p in 1 .. 2:
       n := Round(Random(150) / 10) + 1
       if n < 1: n := 1
@@ -163,8 +169,7 @@ proc tela1() =
       jogador[p].personagem := n
       for c in 1 .. 14:
         if jogador[p].personagem == c:
-          carregarlutador(numerado(if c < 10: "Lutadores/C0" else: "Lutadores/C", c, ".bmp"),
-            Byte(uint8(c)), Byte(uint8(p)))
+          carregarlutador(lutador(c), Byte(uint8(c)), Byte(uint8(p)))
   if piscar < 12 and creditos == 0: texto(200, 235, linha(6), 'c', 10, RGB(255, 255, 255))
   if piscar < 12 and creditos > 0: texto(200, 235, linha(7), 'c', 10, RGB(255, 255, 255))
 
@@ -279,6 +284,142 @@ proc tela4() =
     at(Byte, 0x4b44db) := 1
     if jogador[1].jogando == 1 and jogador[2].jogando == 1: tela := 6
 
+## the one player ladder: the next opponent among the eight, then the scene
+## of the fight, drawn by the one the computer plays (Fadiga.dat skips it)
+proc tela5() =
+  for i in 0 .. 60:
+    barra(0, i * 10, 400, i * 10 + 10, RGB(i * 2 + 10, i * 3 + 20, i * 4 + 30))
+  if etapa < 1: etapa := 1
+  if etapa > 8: etapa := 8
+  if musicaatual != 0 and DXWaveListMusica.Count > 0: DXWaveListMusica.Stop(0)
+  for p in 1 .. 2:
+    let j = jogador[p]
+    j.at(Byte, 0x8c) := 0
+    j.at(Double, 0x60) := 0.0
+    j.at(Word, 0x58) := 0
+    j.at(Byte, 0x97) := 0
+  for p in 1 .. 2:
+    let j = jogador[p]
+    if j.jogando == 1:
+      j.escolheu := 1
+      let cor = RGB(150, 255, 180)
+      if contador < 30: texto(200 - (contador - 30) * 20, 135, linha(20), 'c', 26, cor)
+      if contador >= 30 and contador <= 100: texto(200, 135, linha(20), 'c', 26, cor)
+      if contador > 100: texto(200 - (contador - 100) * 20, 135, linha(20), 'c', 26, cor)
+      jogador[3 - p].personagem := j.adversario(etapa - 1)
+      if contador > 40:
+        texto(200, 180, $Lines(MemoNomes, jogador[3 - p].personagem), 'c', 15, RGB(255, 255, 255))
+      for k in 1 .. 8:
+        let r = j.adversario(k - 1) * 5 - 4
+        let x = k * 48 - 40
+        if DXImageListRetrato.Count > r:
+          if contador < 50 and etapa >= k: DXImageListRetrato.Draw(r, x, 470 - contador * 5)
+          if contador >= 50 and etapa >= k: DXImageListRetrato.Draw(r, x, 220)
+          if contador < 50 and etapa > k: DXImageListIcone.Draw(10, x + 5, 485 - contador * 5)
+          if contador >= 50 and etapa > k: DXImageListIcone.Draw(10, x + 5, 235)
+        if churros == 0:
+          if contador < 50 and etapa < k: DXImageListIcone.Draw(9, x, 470 - contador * 5)
+          if contador >= 50 and etapa < k: DXImageListIcone.Draw(9, x, 220)
+        if churros == 1 and etapa < k:
+          if contador < 50: DXImageListRetrato.Draw(r, x, 470 - contador * 5)
+          if contador >= 50: DXImageListRetrato.Draw(r, x, 220)
+  if contador >= 50 and piscar <= 10: DXImageListIcone.Draw(8, etapa * 48 - 20, 215)
+  if contador > 60 and DXImageListCenario.Count > 0:
+    DXImageListCenario.StretchDraw(0, Rect(80, 6, 320, 134))
+    texto(200, 115, $Lines(MemoCenarios, cenario - 1), 'c', 9, RGB(255, 255, 255))
+  if contador == 0:
+    const
+      proprio = [1, 2, 2, 3, 3, 4, 11, 1, 1, 11, 6, 1, 1, 2, 1]
+      outro = [0, 7, 10, 10, 8, 8, 5, 9, 10, 10, 5, 9, 5, 1, 6]
+    for p in 1 .. 2:
+      let j = jogador[p]
+      if j.jogando == 0:
+        for c in 1 .. 15:
+          if j.personagem == c: cenario := proprio[c - 1]
+        if Random(5) - 1 <= 0 and etapa < 8:
+          for c in 2 .. 15:
+            if j.personagem == c: cenario := outro[c - 1]
+        if Random(6) - 1 <= 0 and etapa < 8 and Integer(j.personagem) in [3, 4, 9, 10, 11, 14]:
+          cenario := 12
+        if sc != 0 and etapa < 8:
+          if sc < 1: sc := 1
+          if sc > 12: sc := 12
+          cenario := sc
+        carregarcenarioatual()
+  inc piscar
+  if piscar > 15: piscar := 0
+  inc contador
+  if contador > 1000: contador := 1000
+  Update()
+  if (isButton1 in Keyboard.States and jogador[1].jogando == 1) or
+      (isButton1 in Joystick.States and jogador[2].jogando == 1):
+    if contador > 0: contador := contador + 5
+  if contador > 120:
+    for i in 0 .. 15:
+      barra(0, i * 20, 400, i * 20 + contador - 120, RGB(0, 0, 0))
+    if contador > 150: tela := 6
+  if fadiga == 1:
+    tela := 10
+    piscar := 0
+    contador := 0
+
+## the fight is set: the countdown, both fighters' strips, the scene when two
+## people play, and the music, by who the computer plays or else drawn
+proc tela6() =
+  tela := 7
+  piscar := 0
+  contador := 0
+  at(Byte, 0x4b5808) := 1
+  at(Byte, 0x4b44e0) := 1
+  at(Word, 0x4b57f6) := 0
+  if temporound == 1: tempo := 30
+  if temporound == 2: tempo := 60
+  if temporound == 3: tempo := 90
+  if temporound == 4: tempo := 99
+  quadros := 25
+  at(Byte, 0x4b44de) := 0
+  at(Byte, 0x4b44df) := 0
+  camerax := 100
+  at(Byte, 0x4b449a) := 0
+  at(Byte, 0x4b57f8) := 0
+  at(Byte, 0x4b57f9) := 0
+  at(Byte, 0x4b57f4) := 0
+  zerardados(Byte(1))
+  zerardados(Byte(2))
+  for p in 1 .. 2:
+    jogador[p].at(Double, 0x60) := 0.0
+    jogador[p].at(Word, 0x58) := 0
+  for i in 1 .. 80: objeto[i].at(Byte, 0x2b) := 0
+  TimerEnabled = false
+  for p in 1 .. 2:
+    for c in 1 .. 15:
+      if jogador[p].personagem == c: carregarlutador(lutador(c), Byte(uint8(c)), Byte(uint8(p)))
+  if jogador[1].jogando == 1 and jogador[2].jogando == 1:
+    var n: Integer
+    n := Round(Random(120) / 10) + 1
+    cenario := n
+    if cenario < 1: cenario := 1
+    if cenario > 12: cenario := 12
+    if sc != 0:
+      if sc < 1: sc := 1
+      if sc > 12: sc := 12
+      cenario := sc
+    carregarcenarioatual()
+  musicaatual := 0
+  for p in 1 .. 2:
+    let j = jogador[p]
+    if j.personagem == 1 and j.jogando == 0: musicaatual := 4
+    if j.personagem == 4 and j.jogando == 0: musicaatual := 2
+    if j.personagem == 2 and j.jogando == 0: musicaatual := 3
+    if cenario == 12: musicaatual := 6
+  if musicaatual == 0:
+    musicaatual := Round(Random(quantmusicas * 10) / 10) + 1
+    if musicaatual < 1: musicaatual := 1
+    if musicaatual > quantmusicas: musicaatual := quantmusicas
+  if musicaatual == 6 and cenario != 12: musicaatual := 1
+  carregarmusica(musicaatual)
+  TimerEnabled = true
+
 proc naoportada() =
   barra(0, 0, 400, 300, RGB(0, 0, 0))
   texto(200, 140, "tela " & $tela & " ainda nao portada", 'c', 10, RGB(255, 255, 255))
@@ -341,7 +482,9 @@ proc DXTimer1Timer*() =
   if tela == 0: tela0()
   if tela == 1: tela1()
   if tela == 4: tela4()
-  if Integer(tela) in [2, 3, 5, 6, 7, 8, 9, 10, 11, 12]: naoportada()
+  if tela == 5: tela5()
+  if tela == 6: tela6()
+  if Integer(tela) in [2, 3, 7, 8, 9, 10, 11, 12]: naoportada()
   sobreposicao()
   if pausa == 1: TimerEnabled = false
   repeticoes()

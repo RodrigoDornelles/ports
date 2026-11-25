@@ -16,6 +16,6 @@ The font is [Comic Relief](https://github.com/loudifier/Comic-Relief) (OFL), met
 
 ## State
 
-The game runs its resolution screen, its opening and the fighter selection, then stops at the screens not ported yet. Each port picks a RetroPad layout. **Moderno**, the default: A confirms, so A and X punch, B and Y kick; A or START also put a coin in and start wherever a player may enter, SELECT opens the settings and backs out of them. **Original**: punches on Y and X, kicks on B and A as on arcade sticks (the keyboard's Z, C, X, V); START is the 1 or 2 key, SELECT inserts a coin.
+The game runs its resolution screen, its opening, the fighter selection and the one player ladder, then stops at the screens not ported yet. Each port picks a RetroPad layout. **Moderno**, the default: A confirms, so A and X punch, B and Y kick; A or START also put a coin in and start wherever a player may enter, SELECT opens the settings and backs out of them. **Original**: punches on Y and X, kicks on B and A as on arcade sticks (the keyboard's Z, C, X, V); START is the 1 or 2 key, SELECT inserts a coin.
 
 The core option `chavo8_viewer` opens an asset viewer instead: L/R change folder, left/right the item, up/down the fighter frame (sliced as the game does) or the text lines, A mirrors or plays, B stops, X shows the color key, START animates.

@@ -16,8 +16,8 @@ proc comecar(j: Lutador, personagem: Byte) =
   j.personagem := personagem
   tela := 4
   fase := 1
-  at(Byte, 0x4b44dd) := 1
-  if gentalha == 1: at(Byte, 0x4b44dd) := 8
+  etapa := 1
+  if gentalha == 1: etapa := 8
   tempo := 30
   quadros := 25
   contador := 0
