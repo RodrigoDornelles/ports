@@ -9,3 +9,4 @@ void viewer_run(uint16_t buttons, surface_t *screen);
 void viewer_deinit(void);
 
 void chavo8_log(const char *fmt, ...);
+void chavo8_notify(const char *text);

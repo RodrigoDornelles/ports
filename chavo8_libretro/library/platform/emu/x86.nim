@@ -23,6 +23,7 @@ proc rd32*(a: uint32): uint32 {.importc, header: "chavo8/x86.h".}
 proc wr32*(a, v: uint32) {.importc, header: "chavo8/x86.h".}
 proc x86_heap_reset*() {.importc, header: "chavo8/x86.h".}
 proc x86_string(at: uint32, len: var uint32): cstring {.importc, header: "chavo8/x86.h".}
+proc x86_call(fn: proc () {.cdecl.}): bool {.importc, header: "chavo8/x86.h".}
 proc x86_hook(target: uint32, fn: proc () {.cdecl.}) {.importc, header: "chavo8/x86.h".}
 proc vcl_create*() {.importc, header: "chavo8/x86.h".}
 proc vcl_input*() {.importc, header: "chavo8/x86.h".}
@@ -41,3 +42,6 @@ proc drop*(bytes: int) = esp[] = esp[] + uint32(bytes)
 
 ## a call of the lifted code to target goes to fn instead
 proc hook*(target: uint32, fn: proc () {.cdecl.}) = x86_hook(target, fn)
+
+## runs the lifted fn; false if it failed, said in the log and on screen
+proc call*(fn: proc () {.cdecl.}): bool = x86_call(fn)

@@ -55,6 +55,13 @@ void chavo8_log(const char *fmt, ...)
         fprintf(stderr, "[chavo8] %s", line);
 }
 
+void chavo8_notify(const char *text)
+{
+    struct retro_message msg = { text, 300 };
+    if (environ_cb)
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+}
+
 uint32_t clock_day_ms(void)
 {
     struct timeval tv;

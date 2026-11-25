@@ -52,6 +52,9 @@ void vcl_create(void);
 void vcl_input(void);
 void vcl_language(int language);
 
+/* runs fn, false if the lifted code failed in it (x86_fail) */
+bool x86_call(void (*fn)(void));
+
 /* AnsiStrings the lifted code makes live in a heap emptied each frame */
 void x86_heap_reset(void);
 uint32_t x86_string_new(const char *text, uint32_t len);

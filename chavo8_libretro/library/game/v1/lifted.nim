@@ -50,4 +50,12 @@ proc tela7*() =
   esp[] = frame - 0x520
   esi[] = form
   for a in countup(esp[], frame - 4, 4): wr32(a, 0)
-  x86v1.tela7()
+  if not call(x86v1.tela7):
+    # a path of the fight not done yet: back to the opening, records and
+    # settings kept
+    tela := 1
+    piscar := 0
+    contador := 0
+    cameray := 0
+    jogador[1].jogando := 0
+    jogador[2].jogando := 0

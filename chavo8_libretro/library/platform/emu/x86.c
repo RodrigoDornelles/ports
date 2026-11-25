@@ -1,4 +1,5 @@
 #include <math.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -47,10 +48,33 @@ void x86_hook(uint32_t target, x86_hook_fn fn)
     x86_fail("no room for a hook", target);
 }
 
+static jmp_buf *catcher;
+
+/* a failure in the code lifted (a routine not done, memory not mapped) ends
+ * the call that ran it, which returns false, instead of the frontend */
+bool x86_call(void (*fn)(void))
+{
+    jmp_buf here, *outer = catcher;
+    catcher = &here;
+    if (setjmp(here)) {
+        catcher = outer;
+        x86.top = 0;
+        return false;
+    }
+    fn();
+    catcher = outer;
+    return true;
+}
+
 _Noreturn void x86_fail(const char *what, uint32_t at)
 {
-    chavo8_log("x86: %s at %08x\n", what, at);
-    abort();
+    char text[128];
+    snprintf(text, sizeof text, "x86: %s at %08x", what, at);
+    chavo8_log("%s\n", text);
+    if (!catcher)
+        abort();
+    chavo8_notify(text);
+    longjmp(*catcher, 1);
 }
 
 int64_t x86_round(double v)
