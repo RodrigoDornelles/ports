@@ -84,6 +84,13 @@ template escolheu*(l: Lutador): untyped = l.at(Byte, 0x9f)
 template adversario*(l: Lutador, k: untyped): untyped = l.at(Byte, 0xa0 + k)  ## 0 to 6, the ladder
 template chefe*(l: Lutador): untyped = l.at(Byte, 0xa7)          ## the last opponent
 template repetechute*(l: Lutador): untyped = l.at(Byte, 0x9d)
+template pontos*(l: Lutador): untyped = l.at(Cardinal, 0x88)
+template cursor*(l: Lutador): untyped = l.at(Byte, 0x8e)          ## the letter of the name being chosen, 1 to 3
+template letra*(l: Lutador, k: untyped): untyped = l.at(Byte, 0x11 + k)  ## the name, String[3] at 11h
+
+proc nome*(l: Lutador): string =
+  let n = min(int(l.at(uint8, 0x11)), 3)
+  for i in 1 .. n: result.add char(l.at(uint8, 0x11 + i))
 
 ## the device's states of the frame before: isButton1..4 at A8h, isUp,
 ## isDown, isLeft, isRight at ACh
