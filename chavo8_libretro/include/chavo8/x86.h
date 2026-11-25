@@ -1,10 +1,11 @@
 #pragma once
 
 /* The machine the Delphi code ran on, for the C that scripts/lift.nim makes
- * of game/v1/dump: the registers, the flags (kept as the last operation, read
+ * of game/assembly.tar.xz: the registers, the flags (kept as the last operation, read
  * when a jump asks), the x87 as doubles, a stack, and memory at the original
  * addresses, mapped onto the ports' own bytes (ChavesVar's, mainly). */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -31,11 +32,30 @@ typedef struct {
     uint8_t *mem;
 } x86_region_t;
 
-#define X86_REGIONS 4
+#define X86_REGIONS 8
 extern x86_region_t x86_regions[X86_REGIONS];
 
 void x86_map(uint32_t base, void *mem, uint32_t size);
+
+/* a call out of the lifted code: to a hook if one was given for the
+ * address, else to what x86.c and vcl.c do of Delphi's RTL, VCL and DelphiX;
+ * the arguments past the registers are from esp up, and the callee drops
+ * them as Delphi's did */
 void x86_rtl(uint32_t target);
+typedef void (*x86_hook_fn)(void);
+void x86_hook(uint32_t target, x86_hook_fn fn);
+bool vcl_call(uint32_t target);
+
+/* the form as objects in that memory (platform/emu/vcl.c), the input DXInput1.Update
+ * reads into them and the language of the memos' Lines */
+void vcl_create(void);
+void vcl_input(void);
+void vcl_language(int language);
+
+/* AnsiStrings the lifted code makes live in a heap emptied each frame */
+void x86_heap_reset(void);
+uint32_t x86_string_new(const char *text, uint32_t len);
+const char *x86_string(uint32_t at, uint32_t *len);
 _Noreturn void x86_fail(const char *what, uint32_t at);
 extern const char *(*x86_literal)(uint32_t at, uint32_t *len);
 
@@ -136,6 +156,35 @@ static inline double f32(uint32_t bits) { float f; memcpy(&f, &bits, 4); return 
 static inline double f64(uint64_t bits) { double d; memcpy(&d, &bits, 8); return d; }
 static inline uint32_t bits32(double v) { float f = (float)v; uint32_t b; memcpy(&b, &f, 4); return b; }
 static inline uint64_t bits64(double v) { uint64_t b; memcpy(&b, &v, 8); return b; }
+
+/* the x87's 80-bit format, to and from doubles, which it holds exactly */
+static inline void x86_wr80(uint32_t a, double v)
+{
+    uint64_t d, mant = 0;
+    memcpy(&d, &v, 8);
+    int ex = (int)(d >> 52 & 0x7ff);
+    uint16_t e16 = (uint16_t)(d >> 48 & 0x8000);
+    if (ex) {
+        mant = 1ull << 63 | (d & 0xfffffffffffffull) << 11;
+        e16 |= (uint16_t)(ex - 1023 + 16383);
+    }
+    uint8_t *p = x86_at(a, 10);
+    memcpy(p, &mant, 8);
+    memcpy(p + 8, &e16, 2);
+}
+
+static inline double x86_rd80(uint32_t a)
+{
+    const uint8_t *p = x86_at(a, 10);
+    uint64_t m;
+    uint16_t e;
+    memcpy(&m, p, 8);
+    memcpy(&e, p + 8, 2);
+    if (!(e & 0x7fff))
+        return 0.0;
+    double v = ldexp((double)m, (e & 0x7fff) - 16383 - 63);
+    return e & 0x8000 ? -v : v;
+}
 
 /* fistp, as Round: to the nearest, halves to even */
 int64_t x86_round(double v);

@@ -4,7 +4,7 @@
 ## variable sits at the address the disassembly shows. Those understood
 ## have a name; the others are reached as at(T, address) until they are.
 
-import ../../delphix/[pascal, delphix, x86]
+import ../../platform/emu/[pascal, x86], ../../platform/delphix/delphix
 
 const
   Base = 0x4b4488

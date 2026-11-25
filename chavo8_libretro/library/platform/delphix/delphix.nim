@@ -1,8 +1,8 @@
 ## What the ports reach of the form, DelphiX, Windows and the RTL's files,
-## over the C of library/delphix and library/platform, named as the Delphi
-## code named it.
+## over the C of platform/delphix and platform/core, named as the Delphi code
+## named it.
 
-import pascal
+import ../emu/pascal
 
 type
   TColor* = Cardinal

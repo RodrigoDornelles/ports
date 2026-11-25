@@ -133,3 +133,52 @@ void canvas_round_rect(surface_t *dst, int l, int t, int r, int b, int w, int h,
                 dst->px[(size_t)y * dst->w + x] = y == t || y == b - 1 || x == x0 || x == x1 ? cp : cb;
     }
 }
+
+static bool in_ellipse(double x, double y, double cx, double cy, double rx, double ry)
+{
+    double u = (x - cx) / rx, v = (y - cy) / ry;
+    return u * u + v * v <= 1.0;
+}
+
+/* GDI Ellipse in the rect, right and bottom left out, with a one pixel pen
+ * and the brush unless bsClear; the rasterization only approaches Windows' */
+void canvas_ellipse(surface_t *dst, int l, int t, int r, int b, uint32_t pen, uint32_t brush, bool hollow)
+{
+    if (r < l) { int s = l; l = r; r = s; }
+    if (b < t) { int s = t; t = b; b = s; }
+    if (r - l < 1 || b - t < 1)
+        return;
+    double cx = (l + r - 1) / 2.0, cy = (t + b - 1) / 2.0, rx = (r - l) / 2.0, ry = (b - t) / 2.0;
+    uint16_t cp = dx_565(pen), cb = dx_565(brush);
+    for (int y = t < 0 ? 0 : t; y < b && y < dst->h; y++)
+        for (int x = l < 0 ? 0 : l; x < r && x < dst->w; x++) {
+            if (!in_ellipse(x, y, cx, cy, rx, ry))
+                continue;
+            bool edge = !in_ellipse(x - 1, y, cx, cy, rx, ry) || !in_ellipse(x + 1, y, cx, cy, rx, ry)
+                || !in_ellipse(x, y - 1, cx, cy, rx, ry) || !in_ellipse(x, y + 1, cx, cy, rx, ry);
+            if (edge || !hollow)
+                dst->px[(size_t)y * dst->w + x] = edge ? cp : cb;
+        }
+}
+
+/* TDirectDrawSurface.DrawRotate: src scaled to w x h, its point (cx*w, cy*h)
+ * put on (x, y), turned by angle 256ths of a turn; the sense of the turn and
+ * the sampling are yet to check against DXRender */
+void dx_draw_rotate(surface_t *dst, int x, int y, int w, int h, const surface_t *src, double cx, double cy, int angle)
+{
+    if (w <= 0 || h <= 0 || !src->w || !src->h)
+        return;
+    double a = angle * M_PI / 128.0, c = cos(a), s = sin(a);
+    double ox = cx * w, oy = cy * h, reach = hypot(w, h) + 1;
+    int x0 = (int)floor(x - reach), x1 = (int)ceil(x + reach), y0 = (int)floor(y - reach), y1 = (int)ceil(y + reach);
+    for (int py = y0 < 0 ? 0 : y0; py < y1 && py < dst->h; py++)
+        for (int px = x0 < 0 ? 0 : x0; px < x1 && px < dst->w; px++) {
+            double dx = px + 0.5 - x, dy = py + 0.5 - y;
+            double u = dx * c + dy * s + ox, v = -dx * s + dy * c + oy;
+            if (u < 0 || v < 0 || u >= w || v >= h)
+                continue;
+            uint16_t p = src->px[(size_t)(v * src->h / h) * src->w + (size_t)(u * src->w / w)];
+            if (!src->transparent || p != src->key)
+                dst->px[(size_t)py * dst->w + px] = p;
+        }
+}

@@ -1,10 +1,10 @@
 ## DXTimer1Timer, the game's frame: each screen is an if on tela, one after
 ## the other, so a screen that hands over to the next lets it run in the same
 ## frame; then what is drawn over every screen, and the input of the frame
-## kept for the next. Screens not ported yet say so.
+## kept for the next. Screens not ported yet say so; the fight's is lifted.
 
-import ../../delphix/[pascal, delphix]
-import chavesvar, chavestexto, chavescentrox
+import ../../platform/emu/pascal, ../../platform/delphix/delphix
+import chavesvar, chavestexto, chavescentrox, lifted
 
 const
   branco = TColor(0xFFFFFF)
@@ -484,7 +484,8 @@ proc DXTimer1Timer*() =
   if tela == 4: tela4()
   if tela == 5: tela5()
   if tela == 6: tela6()
-  if Integer(tela) in [2, 3, 7, 8, 9, 10, 11, 12]: naoportada()
+  if tela == 7: lifted.tela7()
+  if Integer(tela) in [2, 3, 8, 9, 10, 11, 12]: naoportada()
   sobreposicao()
   if pausa == 1: TimerEnabled = false
   repeticoes()

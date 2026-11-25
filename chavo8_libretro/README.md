@@ -6,11 +6,19 @@ Load `Chaves.exe` from the game's folder, or a `.zip` holding that folder. The c
 
 ## Layout
 
-- `library/platform/`: libretro, the game's files (folder or zip, names without case), the exe's resources and form, BMP and WAV, and the game's texts read from the code that filled its memos (`texts.c`).
-- `library/delphix/`: what the game got from DelphiX and Windows: 16-bit surfaces, GDI canvas and text, DirectSound mixing; `pascal.nim` gives Delphi's integer and RTL semantics to the Nim ports.
+- `library/platform/core/`: libretro, the game's files (folder or zip, names without case), the exe's resources and form, BMP and WAV, and the game's texts read from the code that filled its memos (`texts.c`).
+- `library/platform/delphix/`: what the game got from DelphiX and Windows: 16-bit surfaces, GDI canvas and text, DirectSound mixing.
+- `library/platform/emu/`: what runs Delphi's code: `pascal.nim` gives its integer and RTL semantics to the Nim ports, `x86.c` and `vcl.c` its RTL, VCL and DelphiX to the lifted x86 (`include/chavo8/x86.h`).
 - `library/game/v1/`: the original releases, ported from their Delphi units in Nim; `library/chavo8.nim` builds every game into one static library linked into the core.
 
-The game's tables of moves, thousands of plain ifs, are not ported by hand: `library/game/v1/dump/*.s` holds their x86 as `scripts/dump.nim` took it from the exe (`dump Chaves.exe library/game/v1/dump 473728-48dd98`), and the build turns it into Nim with `scripts/lift.nim`, over the machine of `library/delphix/x86.nim` whose memory is ChavesVar's bytes.
+The fight (tela 7 of DXTimer1Timer, the methods it calls and ChavesGolpes' tables of moves, thousands of plain ifs) is not ported by hand: `library/game/assembly.tar.xz` holds its x86 as `scripts/dump.nim` took it from the exe, one `.s` a function, and the build unpacks it and turns it into C with `scripts/lift.nim` (`x86v1_<function>.c`), over the machine of `include/chavo8/x86.h` whose memory is ChavesVar's bytes. Its calls out go to Delphi's RTL (`library/platform/emu/x86.c`), to the VCL and DelphiX over a form laid out as objects (`library/platform/emu/vcl.c`), or back to the methods ported in Nim (`library/game/v1/lifted.nim`). To dump again:
+
+```
+dump Chaves.exe library/game/assembly.tar.xz 473728-48dd98 48edfc-4905a8=desenhaefeitos 4905a8-4908a8=seta \
+  490bb8-4914bc=desenhalutador 491b5c-491edc=mostrasequencia 491edc-4931ac=mostragolpe 4931ac-494bd8=cpu \
+  494bd8-4951b8=defendergolpe 4951b8-4951ec=sequencia 4951ec-4968b0=golpe 4968b0-499ea4=sequenciagolpe \
+  49a3f4-49cd34=desenhaanimacoes 48e5fc-48e69c=circulo 48e69c-48e720=circulopintado 4a44b3-4ab259=tela7
+```
 
 The settings live in `chavo8.ini` of the frontend's save folder; without it, a `Chaves.dat` of the original beside the exe is read, as are the unlock files (`Churros.dat`, `Satanas.dat`, `SC01.dat`...).
 

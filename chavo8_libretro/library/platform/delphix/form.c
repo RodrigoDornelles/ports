@@ -224,6 +224,13 @@ void dx_images_stretch(int list, int index, int l, int t, int r, int b)
         dx_draw_alpha(&form.screen, l, t, r, b, s, 255);
 }
 
+void dx_images_rotate(int list, int index, int x, int y, int w, int h, double cx, double cy, int angle)
+{
+    const surface_t *s = dx_images_get(list, index);
+    if (s)
+        dx_draw_rotate(&form.screen, x, y, w, h, s, cx, cy, angle);
+}
+
 void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha)
 {
     const surface_t *s = dx_images_get(list, index);

@@ -1,7 +1,7 @@
 ## ChavesCentroX: the methods of TForm1, the game's only form, as their
 ## code reads. Variables not yet understood are at(T, address) of ChavesVar.
 
-import ../../delphix/[pascal, delphix]
+import ../../platform/emu/pascal, ../../platform/delphix/delphix
 import chavesvar, chavestexto
 
 const

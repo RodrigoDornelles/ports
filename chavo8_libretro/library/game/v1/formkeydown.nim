@@ -1,6 +1,6 @@
 ## FormKeyDown, the keys Windows sent the form, as virtual key codes.
 
-import ../../delphix/[pascal, delphix]
+import ../../platform/emu/pascal, ../../platform/delphix/delphix
 import chavesvar, chavescentrox
 
 proc entrar(j: Lutador) =

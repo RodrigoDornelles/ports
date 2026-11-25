@@ -1,9 +1,7 @@
 ## The original Street Chaves releases, ported from their Delphi units.
 
-import ../../delphix/[pascal, delphix]
-import chavestexto, chavesvar, chavescentrox, dxtimer1timer, formkeydown, x86v1
-export pascal, delphix, chavestexto, chavesvar, chavescentrox, dxtimer1timer, formkeydown, x86v1
+import ../../platform/emu/pascal, ../../platform/delphix/delphix
+import chavestexto, chavesvar, chavescentrox, dxtimer1timer, formkeydown, lifted
+export pascal, delphix, chavestexto, chavesvar, chavescentrox, dxtimer1timer, formkeydown, lifted
 
 const name* = "Street Chaves"
-
-x86v1_lifted()

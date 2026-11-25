@@ -1,20 +1,25 @@
 ## dump: the game's x86 code, function by function, for lift.nim to turn into
-## Nim at build time, so building needs no Chaves.exe.
+## C at build time, so building needs no Chaves.exe.
 ##
-## usage: dump <Chaves.exe> <dir> <first>-<end>[=name] ...
+## usage: dump <Chaves.exe> <assembly.tar.xz> <first>-<end>[=name] ...
 ##
 ## Every function whose entry lies in a range given (hex addresses), called
 ## from anywhere in the exe, is disassembled by objdump following its jumps,
 ## as Delphi leaves strings and constants between functions; a name given
-## to a range's first address names that function. <dir>/<name>.s gets:
+## to a range's first address names that function. <name>.s, in the archive
+## (GNU tar and xz, owners, dates and order fixed and xz on one thread, so the
+## same code packs into the same bytes), gets:
 ##   ; entry <hex>
+##   ; exit <hex>                          where the code leaves the range given,
+##                                        a fragment of a function (a screen of
+##                                        DXTimer1Timer) ending there
 ##   <hex>: <instruction>                 (Intel syntax, as objdump writes it)
 ##   .data <hex> <hex bytes>              memory the code reads at a fixed
 ##                                        address outside the BSS: constants,
 ##                                        the pointers to the units' variables
 ##   .string <hex> <hex bytes>            a string literal its code points to
 
-import std/[algorithm, os, osproc, sequtils, sets, strformat, strutils, tables]
+import std/[algorithm, os, osproc, sequtils, sets, strformat, strutils, tables, tempfiles]
 
 type
   Section = object
@@ -41,7 +46,7 @@ proc load(path: string): Exe =
 
 proc bytesAt(e: Exe, va: uint32, n: int): string =
   for s in e.sections:
-    if va >= s.va and va + uint32(n) <= s.va + s.size:
+    if va >= s.va and uint64(va) + uint64(n) <= uint64(s.va) + uint64(s.size):
       return e.data[int(s.raw + va - s.va) ..< int(s.raw + va - s.va) + n]
   ""
 
@@ -78,11 +83,11 @@ proc isJump(m: string): bool = m.startsWith("j") or m == "call" or m == "loop" o
 proc main() =
   let args = commandLineParams()
   if args.len < 3:
-    quit "usage: dump <Chaves.exe> <dir> <first>-<end>[=name] ..."
+    quit "usage: dump <Chaves.exe> <assembly.tar.xz> <first>-<end>[=name] ..."
   let path = args[0]
   let exe = load(path)
-  let dir = args[1]
-  createDir(dir)
+  let archive = absolutePath(args[1])
+  let dir = createTempDir("chavo8", "dump")
   var ranges: seq[(uint32, uint32)]
   var names: Table[uint32, string]
   for a in args[2 .. ^1]:
@@ -112,7 +117,13 @@ proc main() =
     var reach = @[entry]
     var seen = initHashSet[uint32]()
     var pushed = initHashSet[uint32]()
-    while reach.len > 0:
+    var exits = initOrderedSet[uint32]()
+    while reach.len > 0 or pushed.len > 0:
+      if reach.len == 0:
+        for p in pushed:
+          if p notin seen: reach.add p
+        pushed.clear
+        continue
       let va = reach.pop
       if va in seen: continue
       if va notin known:
@@ -127,27 +138,24 @@ proc main() =
       let t = target(i.text)
       if m == "call":
         if t >= 0 and inside(uint32(t)) and uint32(t) notin done: queue.add uint32(t)
-        reach.add next
+        if inside(next): reach.add next else: exits.incl next
       elif m == "jmp":
         if t < 0: quit &"dump: indirect jump at {va:x}"
-        if inside(uint32(t)): reach.add uint32(t)
+        if inside(uint32(t)): reach.add uint32(t) else: exits.incl uint32(t)
       elif m == "ret":
         discard
       elif isJump(m):
-        reach.add uint32(t)
-        reach.add next
+        if inside(uint32(t)): reach.add uint32(t) else: exits.incl uint32(t)
+        if inside(next): reach.add next else: exits.incl next
       else:
         # push of a label: Delphi's finally returns there with ret
         if m == "push" and t >= int64(entry) and t < int64(entry) + 0x20000 and
             u32(exe.bytesAt(uint32(t) - 8, 4) & "\0\0\0\0", 0) != 0xFFFF_FFFF'u32:
           pushed.incl uint32(t)
-        reach.add next
-      if reach.len == 0:
-        for p in pushed:
-          if p notin seen: reach.add p
-        pushed.clear
+        if inside(next): reach.add next else: exits.incl next
     var insns = toSeq(seen).sorted.mapIt(known[it])
     var lines = @[&"; entry {entry:x}"]
+    for x in exits: lines.add &"; exit {x:x}"
     var datas = initOrderedSet[uint32]()
     var strs = initOrderedSet[uint32]()
     for i in insns:
@@ -170,5 +178,15 @@ proc main() =
     let name = names.getOrDefault(entry, &"f{entry:x}")
     writeFile(dir / name & ".s", lines.join("\n") & "\n")
     echo &"{name}: {insns.len} instructions"
+
+  var files: seq[string]
+  for f in walkFiles(dir / "*.s"): files.add f.extractFilename
+  let z = startProcess("tar", dir, @["--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner",
+    "--mode=a=r,u+w", "--format=gnu", "--use-compress-program=xz -9e -T1", "-cf", archive] & files.sorted,
+    options = {poUsePath, poParentStreams})
+  let code = z.waitForExit
+  z.close
+  removeDir(dir)
+  if code != 0: quit "dump: tar failed"
 
 main()

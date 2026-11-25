@@ -30,6 +30,8 @@ void dx_draw_alpha(surface_t *dst, int l, int t, int r, int b, const surface_t *
 void canvas_fill_rect(surface_t *dst, int l, int t, int r, int b, uint32_t color);
 void canvas_frame_rect(surface_t *dst, int l, int t, int r, int b, uint32_t color);
 void canvas_round_rect(surface_t *dst, int l, int t, int r, int b, int w, int h, uint32_t pen, uint32_t brush);
+void canvas_ellipse(surface_t *dst, int l, int t, int r, int b, uint32_t pen, uint32_t brush, bool hollow);
+void dx_draw_rotate(surface_t *dst, int x, int y, int w, int h, const surface_t *src, double cx, double cy, int angle);
 
 /* TCanvas.Pixels: CLR_INVALID out of the bitmap, which splits into white */
 uint32_t canvas_pixel(const image_t *img, int x, int y);
@@ -63,6 +65,7 @@ uint32_t form_image_pixel(int image, int x, int y);
 void dx_images_draw(int list, int index, int x, int y);
 void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha);
 void dx_images_stretch(int list, int index, int l, int t, int r, int b);
+void dx_images_rotate(int list, int index, int x, int y, int w, int h, double cx, double cy, int angle);
 void dx_waves_play(int list, int index);
 void dx_waves_stop(int list, int index);
 void dx_terminate(void);

@@ -48,14 +48,24 @@ endif()
 file(COPY_FILE "${CMAKE_BINARY_DIR}/chavo8/font.h"
     "${CHAVO8_INCLUDE_GENERATED}/chavo8/font.h" ONLY_IF_DIFFERENT)
 
-# the x86 dumped into game/v1/dump (scripts/dump.nim), as C the games call
-# (scripts/lift.nim): x86v1.c and its declarations for Nim, x86v1.nim; a dump that
-# changes reconfigures
+# the x86 dumped into game/assembly.tar.xz (scripts/dump.nim), unpacked and
+# turned into C the games call (scripts/lift.nim): x86v1*.c and their
+# declarations for Nim, x86v1.nim; the archive or the lifter changing reconfigures
 dopo_nim_tool(chavo8_lift "${CHAVO8_DIR}/scripts/lift.nim")
+set(CHAVO8_ASSEMBLY "${CHAVO8_DIR}/library/game/assembly.tar.xz")
 set(CHAVO8_LIFTED "${CMAKE_BINARY_DIR}/chavo8/lifted")
-file(MAKE_DIRECTORY "${CHAVO8_LIFTED}")
-file(GLOB chavo8_dumps CONFIGURE_DEPENDS "${CHAVO8_DIR}/library/game/v1/dump/*.s")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${chavo8_dumps})
+set(chavo8_unpacked "${CMAKE_BINARY_DIR}/chavo8/assembly")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CHAVO8_ASSEMBLY}")
+file(REMOVE_RECURSE "${chavo8_unpacked}")
+file(MAKE_DIRECTORY "${chavo8_unpacked}" "${CHAVO8_LIFTED}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E tar xf "${CHAVO8_ASSEMBLY}"
+    WORKING_DIRECTORY "${chavo8_unpacked}"
+    RESULT_VARIABLE chavo8_unpack_result)
+if (chavo8_unpack_result)
+    message(FATAL_ERROR "chavo8: failed to unpack ${CHAVO8_ASSEMBLY}")
+endif()
+file(GLOB chavo8_dumps "${chavo8_unpacked}/*.s")
 execute_process(
     COMMAND "${chavo8_lift_TOOL}" x86v1 "${CHAVO8_LIFTED}" ${chavo8_dumps}
     RESULT_VARIABLE chavo8_lift_result
@@ -73,7 +83,8 @@ dopo_nim_library(chavo8_game "${CHAVO8_DIR}/library/chavo8.nim"
 target_include_directories(chavo8_game PRIVATE "${CHAVO8_DIR}/include")
 
 file(GLOB_RECURSE chavo8_files CONFIGURE_DEPENDS "${CHAVO8_DIR}/library/*.c")
-list(APPEND chavo8_files "${CHAVO8_LIFTED}/x86v1.c")
+file(GLOB chavo8_lifted "${CHAVO8_LIFTED}/x86v1*.c")
+list(APPEND chavo8_files ${chavo8_lifted})
 
 if (EMSCRIPTEN)
     add_library(chavo8_libretro STATIC "${chavo8_files}")

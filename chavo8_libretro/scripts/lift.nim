@@ -1,10 +1,10 @@
-## lift: the x86 of game/v1/dump (scripts/dump.nim) as C, at build time.
+## lift: the x86 of game/assembly.tar.xz (scripts/dump.nim) as C, at build time.
 ##
 ## usage: lift <module> <dir> <dump.s>...
 ##
-## Writes <dir>/<module>.c, a function per dumped one over the machine of
-## include/chavo8/x86.h, and <dir>/<module>.nim, their declarations for the
-## Nim ports. An instruction is a line or two on the registers and memory;
+## Writes <dir>/<module>_<function>.c, a function per dumped one over the
+## machine of include/chavo8/x86.h, <dir>/<module>.c, the strings they use,
+## and <dir>/<module>.nim, their declarations for the Nim ports. An instruction is a line or two on the registers and memory;
 ## reads of a fixed address that is not a variable (constants, the pointers
 ## to the units' variables) take the value the dump recorded; the flags are
 ## only kept when something reads them, a cmp or test right before the jump
@@ -25,6 +25,7 @@ type
     name: string
     entry: uint32
     insns: seq[Insn]
+    exits: HashSet[uint32]
 
 const chunk = 150
 
@@ -45,6 +46,8 @@ proc parse(path: string) =
   for line in lines(path):
     if line.startsWith("; entry "):
       fn.entry = parseHexInt(line[8 .. ^1]).uint32
+    elif line.startsWith("; exit "):
+      fn.exits.incl parseHexInt(line[7 .. ^1]).uint32
     elif line.startsWith(".data "):
       let p = line.splitWhitespace
       data[parseHexInt(p[1]).uint32] = hexBytes(p[2])
@@ -221,6 +224,7 @@ proc fval(i: Insn, op: string): string =
   case n
   of 32: &"f32(rd32({a}))"
   of 64: &"f64(rd64({a}))"
+  of 80: &"x86_rd80({a})"
   else: (i.fail("x87 size"); "")
 
 proc fint(i: Insn, op: string): string =
@@ -290,8 +294,10 @@ proc compare(i, j: Insn): string =
     return case j.m
       of "je", "jz": &"{t} == 0"
       of "jne", "jnz": &"{t} != 0"
-      of "js": &"({t} >> {bits - 1}) != 0"
-      of "jns": &"({t} >> {bits - 1}) == 0"
+      of "js", "jl": &"({t} >> {bits - 1}) != 0"
+      of "jns", "jge": &"({t} >> {bits - 1}) == 0"
+      of "jle": &"{t} == 0 || ({t} >> {bits - 1}) != 0"
+      of "jg": &"{t} != 0 && ({t} >> {bits - 1}) == 0"
       else: (i.fail("test then " & j.m); "")
   let s = &"int{bits}_t"
   let us = &"uint{bits}_t"
@@ -316,9 +322,13 @@ proc compare(i, j: Insn): string =
 var
   chunkOf: Table[uint32, int]
   current: int
+  exits: HashSet[uint32]
 
+## a fragment's exits are where it gives back to the code around it
 proc goto(t: uint32): string =
-  if chunkOf.getOrDefault(t, -1) == current: &"goto L{t:x};" else: &"return {u(t)};"
+  if t in exits: "return 0;"
+  elif chunkOf.getOrDefault(t, -1) == current: &"goto L{t:x};"
+  else: &"return {u(t)};"
 
 proc arith(i: Insn, op, kind: string, carryIn = "", keep = true): seq[string] =
   let bits = bitsOf(i)
@@ -426,6 +436,7 @@ proc lift(fn: Fn, i: Insn, next: uint32, labels: HashSet[uint32]): seq[string] =
       case sizeOf(o[0])
       of 32: result.add &"wr32({a}, bits32(ST(0)));"
       of 64: result.add &"wr64({a}, bits64(ST(0)));"
+      of 80: result.add &"x86_wr80({a}, ST(0));"
       else: i.fail("fst size")
     if i.m == "fstp": result.add "fpop();"
   of "fistp", "fist":
@@ -464,10 +475,13 @@ proc lift(fn: Fn, i: Insn, next: uint32, labels: HashSet[uint32]): seq[string] =
     result.add "fpop();"
   of "jmp":
     let t = target(i)
-    if t in labels: result.add goto(t)
+    if t in labels or t in exits: result.add goto(t)
     elif t in byEntry: result.add &"{byEntry[t]}(); return 0;"
     else: result.add &"x86_fail(\"{fn.name} leaves\", {u(t)});"
   of "call":
+    if not isImm(o[0]):
+      result.add &"x86_rtl({read(i, o[0])});"
+      return
     let t = target(i)
     if t in byEntry:
       result.add &"push32({u(next)});"
@@ -487,7 +501,9 @@ proc lift(fn: Fn, i: Insn, next: uint32, labels: HashSet[uint32]): seq[string] =
     let c = cond(i.m)
     if c == "": i.fail("not understood")
     if i.m.startsWith("set"): result.add write(i, o[0], &"{c} ? 1u : 0u")
-    else: result.add &"if ({c}) {goto(target(i))}"
+    else:
+      if target(i) notin labels and target(i) notin exits: i.fail("a jump out of the dump")
+      result.add &"if ({c}) {goto(target(i))}"
 
 proc emit(fn: Fn): string =
   var labels = initHashSet[uint32]()
@@ -500,6 +516,7 @@ proc emit(fn: Fn): string =
     if (i.m == "jmp" or i.m == "ret") and k + 1 < fn.insns.len:
       labels.incl fn.insns[k + 1].va
   chunkOf.clear
+  exits = fn.exits
   var starts: seq[uint32]
   var count = 0
   for i in fn.insns:
@@ -516,7 +533,7 @@ proc emit(fn: Fn): string =
     o.add "    switch (pc) {"
     for i in fn.insns:
       if i.va in labels and chunkOf[i.va] == c: o.add &"    case {u(i.va)}: goto L{i.va:x};"
-    o.add "    default: return pc;"
+    o.add "    default: x86_fail(\"no label\", pc);"
     o.add "    }"
     var skip = false
     while k < fn.insns.len and chunkOf[fn.insns[k].va] == c:
@@ -549,6 +566,8 @@ proc emit(fn: Fn): string =
       let ends = i.m == "jmp" or i.m == "ret"
       if not ends and last + 1 < fn.insns.len and chunkOf[fn.insns[last + 1].va] != c:
         o.add &"    return {u(fn.insns[last + 1].va)};"
+      elif not ends and last + 1 == fn.insns.len and fn.exits.len > 0:
+        o.add "    return 0;"
       elif not ends and last + 1 == fn.insns.len:
         o.add &"    x86_fail(\"{fn.name} runs past its end\", {u(i.va)});"
       inc k
@@ -566,17 +585,22 @@ proc emit(fn: Fn): string =
   o.add "}"
   o.join("\n")
 
+proc save(path, text: string) =
+  if not fileExists(path) or readFile(path) != text: writeFile(path, text)
+
 proc main() =
   let args = commandLineParams()
   if args.len < 3: quit "usage: lift <module> <dir> <dump.s>..."
   let module = args[0]
+  let dir = args[1]
   for p in args[2 .. ^1].sorted: parse(p)
-  var c = @[&"/* generated by scripts/lift.nim from the dumps; do not edit */",
+  var head = @[&"/* generated by scripts/lift.nim from the dumps; do not edit */",
     "", "#include <math.h>", "", "#include \"chavo8/x86.h\"", ""]
-  for r in regs32: c.add &"#define {r} x86.r[X86_{r.toUpperAscii}]"
-  c.add ""
-  for fn in fns: c.add &"void {fn.name}(void);"
-  c.add ""
+  for r in regs32: head.add &"#define {r} x86.r[X86_{r.toUpperAscii}]"
+  head.add ""
+  for fn in fns: head.add &"void {fn.name}(void);"
+  head.add ""
+  var c = head
   c.add "static const char *literal(uint32_t at, uint32_t *len)"
   c.add "{"
   c.add "    switch (at) {"
@@ -590,12 +614,18 @@ proc main() =
   c.add "{"
   c.add "    x86_literal = literal;"
   c.add "}"
-  c.add ""
-  for fn in fns: c.add emit(fn) & "\n"
-  var n = @[&"## generated by scripts/lift.nim: the functions of {module}.c", ""]
+  save(dir / module & ".c", c.join("\n") & "\n")
+  # a file a function, for the compiler to take them in parallel
+  var written = initHashSet[string]()
+  for fn in fns:
+    let path = dir / &"{module}_{fn.name}.c"
+    written.incl path
+    save(path, (head & emit(fn)).join("\n") & "\n")
+  for path in walkFiles(dir / module & "_*.c"):
+    if path notin written: removeFile(path)
+  var n = @[&"## generated by scripts/lift.nim: the functions of {module}*.c", ""]
   n.add &"proc {module}_lifted*() {{.importc, cdecl.}}"
   for fn in fns: n.add &"proc {fn.name}*() {{.importc, cdecl.}}"
-  for (path, text) in [(args[1] / module & ".c", c.join("\n") & "\n"), (args[1] / module & ".nim", n.join("\n") & "\n")]:
-    if not fileExists(path) or readFile(path) != text: writeFile(path, text)
+  save(dir / module & ".nim", n.join("\n") & "\n")
 
 main()

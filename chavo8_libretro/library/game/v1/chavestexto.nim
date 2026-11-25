@@ -1,9 +1,9 @@
 ## ChavesTexto: its procedure cleared the form's seven memos and added
 ## every line of the game in the language asked for (1 Portuguese, any other
 ## Spanish). The lines are read from that code in the exe
-## (platform/texts.c), so loading a language is choosing which to read.
+## (platform/core/texts.c), so loading a language is choosing which to read.
 
-import ../../delphix/pascal
+import ../../platform/emu/pascal
 
 type Memo* = enum
   MemoNomes, MemoTexto, MemoConfig, MemoFrases, MemoDialogo, MemoFinais, MemoCenarios

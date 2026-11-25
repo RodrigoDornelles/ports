@@ -16,6 +16,7 @@ proc chavo8_v1_line(idioma: cint, memo: cint, index: cint): cstring {.exportc, c
 
 proc chavo8_v1_create() {.exportc, cdecl.} =
   FormCreate()
+  criar()
 
 ## a frame of the frontend: the keys pressed since the last, then OnTimer
 ## if DXTimer1 is on; its interval, the ms the frame lasts
