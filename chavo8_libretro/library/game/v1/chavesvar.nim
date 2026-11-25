@@ -1,0 +1,91 @@
+## ChavesVar: the game's globals, kept as the very bytes the original laid
+## out from 004B4488 to 004B58B4 (Delphi allocates a unit's variables in
+## their declaration order), so a snapshot is a copy of them and every
+## variable sits at the address the disassembly shows. Those understood
+## have a name; the others are reached as at(T, address) until they are.
+
+import ../../delphix/pascal
+
+const
+  Base = 0x4b4488
+  Size = 0x4b58b4 - Base
+
+var chavesVar* {.align(16).}: array[Size, uint8]
+
+template at*(T: typedesc, address: int): untyped =
+  cast[ptr T](addr chavesVar[address - Base])[]
+
+template velocidade*: untyped = at(Word, 0x4b44d0)       ## DXTimer1.Interval in ms, - and + in game
+template niveljogo*: untyped = at(Byte, 0x4b44d9)        ## Nível do Jogo, 1 to 8
+template rounds*: untyped = at(Byte, 0x4b44dc)           ## 1 to 3
+template sangue*: untyped = at(Byte, 0x4b44e1)
+template poder*: untyped = at(Byte, 0x4b44e2)            ## NORMAL, 1P MAX, 2P MAX, MAX
+template musicaatual*: untyped = at(Byte, 0x4b580a)      ## the Musicas/Musica-n.wav loaded
+template niveldano*: untyped = at(Double, 0x4b5888)      ## Nível de Dano, 0.3 to 2
+template energeticos*: untyped = at(Double, 0x4b5898)    ## 0.15 with Energeticos.dat
+template temporound*: untyped = at(Byte, 0x4b58a0)       ## 30, 60, 90 seconds or none
+template linguagem*: untyped = at(Byte, 0x4b58a1)        ## 1 Português, 2 Español
+template quantsons*: untyped = at(Byte, 0x4b58a2)
+template quantmusicas*: untyped = at(Byte, 0x4b58a3)
+template depuracao*: untyped = at(Byte, 0x4b58a4)        ## the author's debug HUD, never on in the release
+template flash*: untyped = at(Byte, 0x4b58a8)
+template mostrarnivel*: untyped = at(Byte, 0x4b58a9)
+template mostrarcreditos*: untyped = at(Byte, 0x4b58aa)
+template churros*: untyped = at(Byte, 0x4b58ab)          ## the unlocks: their .dat beside the exe
+template gentalha*: untyped = at(Byte, 0x4b58ac)
+template satanas*: untyped = at(Byte, 0x4b58ad)
+template fadiga*: untyped = at(Byte, 0x4b58ae)
+template mentecapto*: untyped = at(Byte, 0x4b58af)
+template bruxa*: untyped = at(Byte, 0x4b58b0)
+template sc*: untyped = at(Byte, 0x4b58b1)               ## the highest SC01..SC12.dat found
+
+## the two fighters, array[1..2] of 176 bytes at 004B44E8
+type
+  Jogadores = object
+  Lutador* = distinct Integer
+
+const jogador* = Jogadores()
+
+template `[]`*(j: Jogadores, p: untyped): Lutador = Lutador(p)
+template at*(l: Lutador, T: typedesc, offset: int): untyped =
+  at(T, 0x4b44e8 + (Integer(l) - 1) * 176 + offset)
+
+template x*(l: Lutador): untyped = l.at(Double, 0x00)
+template y*(l: Lutador): untyped = l.at(Double, 0x08)
+template personagem*(l: Lutador): untyped = l.at(Byte, 0x10)
+
+## array[1..80] of 56 bytes at 004B4648
+type
+  Objetos = object
+  Objeto* = distinct Integer
+
+const objeto* = Objetos()
+
+template `[]`*(o: Objetos, i: untyped): Objeto = Objeto(i)
+template at*(o: Objeto, T: typedesc, offset: int): untyped =
+  at(T, 0x4b4648 + (Integer(o) - 1) * 56 + offset)
+
+## the best ten, array[1..10] of record nome: String[3]; personagem: Byte;
+## pontos: Cardinal end at 004B5810
+type
+  Recordes = object
+  Recorde* = distinct Integer
+
+const recorde* = Recordes()
+
+template `[]`*(r: Recordes, i: untyped): Recorde = Recorde(i)
+template at*(r: Recorde, T: typedesc, offset: int): untyped =
+  at(T, 0x4b5810 + (Integer(r) - 1) * 12 + offset)
+
+template personagem*(r: Recorde): untyped = r.at(Byte, 4)
+template pontos*(r: Recorde): untyped = r.at(Cardinal, 8)
+
+proc nome*(r: Recorde): string =
+  let n = min(int(r.at(uint8, 0)), 3)
+  for i in 1 .. n: result.add char(r.at(uint8, i))
+
+## a short string assignment copies the length byte and the characters kept
+proc `nome=`*(r: Recorde, s: string) =
+  let n = min(s.len, 3)
+  r.at(uint8, 0) = uint8(n)
+  for i in 1 .. n: r.at(uint8, i) = uint8(s[i - 1])

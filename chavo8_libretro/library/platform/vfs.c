@@ -200,11 +200,24 @@ const char *vfs_exe(void)
     return vfs.exe;
 }
 
-uint8_t *vfs_load(const char *name, size_t *size)
+static entry_t *find(const char *name)
 {
+    while (name[0] == '.' && (name[1] == '/' || name[1] == '\\'))
+        name += 2;
     entry_t probe = { .key = key_of(name) };
     entry_t *e = bsearch(&probe, vfs.e, vfs.n, sizeof *vfs.e, by_key);
     free(probe.key);
+    return e;
+}
+
+bool vfs_exists(const char *name)
+{
+    return find(name) != NULL;
+}
+
+uint8_t *vfs_load(const char *name, size_t *size)
+{
+    entry_t *e = find(name);
     if (!e)
         return NULL;
     uint8_t *data = malloc(e->usize ? e->usize : 1);

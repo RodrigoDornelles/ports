@@ -39,6 +39,9 @@ proc `:=`*[T: Small, V: SomeInteger | Small](dst: var T, v: V) =
 proc `:=`*[V: SomeInteger | Small](dst: var Integer, v: V) =
   dst = cast[int32](uint32(int64(v) and 0xFFFF_FFFF))
 
+proc `:=`*[V: SomeInteger | Small](dst: var Cardinal, v: V) =
+  dst = uint32(int64(v) and 0xFFFF_FFFF)
+
 proc `:=`*[V: SomeInteger | Small](dst: var Real, v: V) = dst = Real(int64(v))
 proc `:=`*(dst: var Real, v: Real) = dst = v
 
@@ -72,6 +75,64 @@ proc Int*(x: Extended): Extended = trunc(x)
 proc Cos*(x: Extended): Extended =
   if abs(x) >= 9223372036854775808.0: 0.0 else: cos(x)
 
+type EConvertError* = object of CatchableError
+
+proc strip_blanks(s: string): string =
+  var a = 0
+  var b = s.len
+  while a < b and s[a] == ' ': inc a
+  while b > a and s[b - 1] == ' ': dec b
+  s[a ..< b]
+
+## Val as StrToInt reads: blanks before, a sign, decimal or hex ($ or 0x),
+## nothing after; out of Integer's range is an error too
+proc StrToInt*(s: string): Integer =
+  var i = 0
+  while i < s.len and s[i] == ' ': inc i
+  var neg = false
+  if i < s.len and s[i] in {'+', '-'}:
+    neg = s[i] == '-'
+    inc i
+  var base = 10
+  if i < s.len and s[i] == '$':
+    base = 16
+    inc i
+  elif i + 1 < s.len and s[i] == '0' and s[i + 1] in {'x', 'X'}:
+    base = 16
+    i += 2
+  if i >= s.len: raise newException(EConvertError, "'" & s & "' is not a valid integer value")
+  var n: int64 = 0
+  while i < s.len:
+    let c = s[i]
+    let d = case c
+      of '0'..'9': ord(c) - ord('0')
+      of 'a'..'f': ord(c) - ord('a') + 10
+      of 'A'..'F': ord(c) - ord('A') + 10
+      else: 99
+    if d >= base: raise newException(EConvertError, "'" & s & "' is not a valid integer value")
+    n = n * base + d
+    if n > 0xFFFF_FFFF'i64: raise newException(EConvertError, "'" & s & "' is not a valid integer value")
+    inc i
+  if base == 10 and n > (if neg: 0x8000_0000'i64 else: 0x7FFF_FFFF'i64):
+    raise newException(EConvertError, "'" & s & "' is not a valid integer value")
+  cast[int32](uint32(if neg: -n and 0xFFFF_FFFF else: n))
+
+proc strtod(s: cstring, e: ptr cstring): cdouble {.importc, header: "<stdlib.h>".}
+
+## TextToFloat takes the decimal separator of Windows' locale, ',' on the
+## Portuguese and Spanish ones the game was for; '.' is taken too
+proc StrToFloat*(s: string): Extended =
+  var t = s.strip_blanks()
+  for c in t.mitems:
+    if c == ',': c = '.'
+  var e: cstring
+  result = strtod(cstring(t), addr e)
+  if t.len == 0 or e != cast[cstring](cast[uint](cstring(t)) + uint(t.len)):
+    raise newException(EConvertError, "'" & s & "' is not a valid floating point value")
+
+proc IntToStr*(n: Int64): string = $n
+proc IntToStr*(n: Integer): string = $n
+
 when isMainModule:
   RandSeed = 0
   doAssert Random(100) == 0
@@ -100,3 +161,9 @@ when isMainModule:
   doAssert Trunc(-2.7) == -2 and Trunc(2.7) == 2
   doAssert Int(-2.7) == -2.0 and Int(2.7) == 2.0
   doAssert Cos(0.0) == 1.0 and Cos(1e19) == 0.0
+  doAssert StrToInt(" 42") == 42 and StrToInt("-7") == -7 and StrToInt("$1F") == 31 and StrToInt("0x10") == 16
+  doAssert StrToInt("-2147483648") == low(Integer)
+  for bad in ["", "4 ", "x", "2147483648", "1.5"]:
+    doAssertRaises(EConvertError): discard StrToInt(bad)
+  doAssert StrToFloat("0,9") == 0.9 and StrToFloat(" 1.5 ") == 1.5
+  doAssertRaises(EConvertError): discard StrToFloat("0,9x")

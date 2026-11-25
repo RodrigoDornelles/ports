@@ -39,6 +39,30 @@ void canvas_copy_rect(image_t *dst, int dl, int dt, int dr, int db,
 int canvas_text_width(int size, const char *text);
 void canvas_text_out(surface_t *dst, int x, int y, uint32_t color, int size, const char *text);
 
+/* the form's components: its TImages (24-bit bitmaps), TDXImageLists
+ * (16-bit surfaces) and TDXWaveLists, with the items its DFM gives them
+ * before FormCreate runs */
+enum { IMAGE_LUTADOR, IMAGE_RETRATO, IMAGE_LUTADOR_FRAME, IMAGE_RETRATO_INVERT, FORM_IMAGES };
+enum {
+    LIST_RETRATO, LIST_EFEITOS, LIST_CENARIO, LIST_ICONE, LIST_LUTADOR, LIST_LUTADOR_INVERT,
+    LIST_ABERTURA, LIST_FINAL, LIST_ANIMACAO, LIST_EFEITOS_INVERT, IMAGE_LISTS
+};
+enum { WAVES_SND, WAVES_MUSICA, WAVES_VITORIA, WAVE_LISTS };
+
+bool form_create(const uint8_t *exe, size_t size);
+void form_destroy(void);
+image_t *form_image(int image);
+bool form_image_load(int image, const char *name);
+void form_image_resize(int image, int w, int h);
+int dx_images_add(int list);
+int dx_images_count(int list);
+void dx_images_assign(int list, int index, int image, bool transparent, uint32_t color);
+const surface_t *dx_images_get(int list, int index);
+int dx_waves_add(int list);
+int dx_waves_count(int list);
+bool dx_waves_load(int list, int index, const char *name);
+const wave_t *dx_waves_get(int list, int index);
+
 /* TDXSound: the waves mixed into 44100 Hz stereo */
 #define DX_RATE 44100
 int dx_play(const wave_t *wave, bool loop);

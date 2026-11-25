@@ -142,8 +142,7 @@ static void collection(reader_t *r)
         }
         byte(r);
         item.name = name;
-        if (item.data.data)
-            r->fn(r->ctx, &item);
+        r->fn(r->ctx, &item);
     }
     byte(r);
 }

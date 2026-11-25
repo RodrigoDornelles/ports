@@ -7,7 +7,7 @@
 #include "chavo8/game.h"
 #include "chavo8/viewer.h"
 
-enum { LUTADORES, CENARIOS, ROSTOS, EFEITOS, ANIMACOES, EXE_IMAGES, SONS, FALAS, MUSICAS, EXE_WAVES, TEXTOS, FONTE, CATEGORIES };
+enum { LUTADORES, CENARIOS, ROSTOS, EFEITOS, ANIMACOES, EXE_IMAGES, SONS, FALAS, MUSICAS, EXE_WAVES, TEXTOS, ESTADO, FONTE, CATEGORIES };
 
 static const struct {
     const char *title, *dir, *ext;
@@ -23,6 +23,7 @@ static const struct {
     [MUSICAS] = { "Musicas", "Musicas", ".wav" },
     [EXE_WAVES] = { "Sons do exe", NULL, NULL },
     [TEXTOS] = { "Textos do exe", NULL, NULL },
+    [ESTADO] = { "Estado do v1", NULL, NULL },
     [FONTE] = { "Fonte", NULL, NULL },
 };
 
@@ -53,6 +54,8 @@ static struct {
 static void collect(void *ctx, const dfm_item_t *item)
 {
     (void)ctx;
+    if (!item->data.data)
+        return;
     bool wave = item->data.size >= 4 && !memcmp(item->data.data, "RIFF", 4);
     int c = wave ? EXE_WAVES : EXE_IMAGES;
     if (v.count[c] == MAX_ITEMS)
@@ -89,6 +92,7 @@ bool viewer_init(const uint8_t *exe, size_t size)
                 v.files[c][v.count[c]++] = names[i];
     }
     v.count[TEXTOS] = 2 * MEMOS;
+    v.count[ESTADO] = 1;
     v.count[FONTE] = 1;
     load();
     return true;
@@ -228,6 +232,15 @@ static void draw_texts(surface_t *s)
     snprintf(v.info, sizeof v.info, "%s, %zu linhas  (cima/baixo rola)", idioma == 1 ? "portugues" : "espanhol", count);
 }
 
+static void draw_state(surface_t *s)
+{
+    char text[2048];
+    snprintf(text, sizeof text, "%s", chavo8_v1_state());
+    int y = 24;
+    for (char *line = strtok(text, "\n"); line && y < s->h - 40; line = strtok(NULL, "\n"), y += 13)
+        label(s, 6, y, 0xFFFFFF, '-', 7, line);
+}
+
 static void draw_font(surface_t *s)
 {
     static const int sizes[] = { 7, 8, 9, 10, 11, 12, 15, 20, 25 };
@@ -290,6 +303,8 @@ void viewer_run(uint16_t buttons, surface_t *screen)
     checkers(screen);
     if (c == TEXTOS) {
         draw_texts(screen);
+    } else if (c == ESTADO) {
+        draw_state(screen);
     } else if (c == FONTE) {
         draw_font(screen);
     } else if (v.nframes) {
@@ -307,6 +322,7 @@ void viewer_run(uint16_t buttons, surface_t *screen)
     const char *name = !v.count[c] ? "(vazio)"
         : c == EXE_IMAGES || c == EXE_WAVES ? v.exe_items[c == EXE_WAVES][v.index[c]].label
         : c == TEXTOS ? memo_name[v.index[c] % MEMOS]
+        : c == ESTADO ? "depois do FormCreate"
         : category[c].dir ? v.files[c][v.index[c]] : "Comic Relief";
     snprintf(head, sizeof head, "%s  %zu/%zu  %s", category[c].title, v.count[c] ? v.index[c] + 1 : 0, v.count[c], name);
     label(screen, 6, 4, 0xFFFFFF, '-', 9, head);

@@ -10,6 +10,7 @@
 bool vfs_open(const char *content);
 void vfs_close(void);
 const char *vfs_exe(void);
+bool vfs_exists(const char *name);
 uint8_t *vfs_load(const char *name, size_t *size);
 size_t vfs_list(const char *dir, const char **names, size_t max);
 
@@ -31,7 +32,8 @@ size_t texts_count(int language, int memo);
 const char *texts_line(int language, int memo, size_t index);
 
 /* the image and wave items of the form's TDXImageList and TDXWaveList
- * components, as the DFM stores them */
+ * components, as the DFM stores them; data is empty for an item without
+ * its picture or wave */
 typedef struct {
     const char *component;
     const char *name;
@@ -63,3 +65,14 @@ typedef struct {
 } wave_t;
 
 bool wave_parse(const uint8_t *data, size_t size, wave_t *out);
+
+/* the game's settings, kept as key=value in chavo8.ini of the frontend's
+ * save folder (none: they are not kept) */
+void config_open(const char *dir);
+const char *config_get(const char *key);
+void config_set(const char *key, const char *value);
+bool config_save(void);
+void config_close(void);
+
+/* milliseconds since midnight, UTC, as Randomize took them */
+uint32_t clock_day_ms(void);

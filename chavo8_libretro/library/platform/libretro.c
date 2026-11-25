@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "libretro.h"
 
@@ -42,6 +43,13 @@ void chavo8_log(const char *fmt, ...)
         log_cb(RETRO_LOG_INFO, "[chavo8] %s", line);
     else
         fprintf(stderr, "[chavo8] %s", line);
+}
+
+uint32_t clock_day_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint32_t)(tv.tv_sec % 86400) * 1000 + (uint32_t)(tv.tv_usec / 1000);
 }
 
 unsigned retro_api_version(void) { return RETRO_API_VERSION; }
@@ -112,6 +120,12 @@ bool retro_load_game(const struct retro_game_info *game)
         chavo8_log("%s does not look like Street Chaves (no ChavesGolpes unit)\n", vfs_exe());
     if (!texts_load(exe, size))
         chavo8_log("%s: the texts were not found in its code\n", vfs_exe());
+    if (!form_create(exe, size))
+        chavo8_log("%s: no form in it\n", vfs_exe());
+    const char *save_dir = NULL;
+    environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
+    config_open(save_dir);
+    chavo8_v1_create();
     surface_new(&screen, DX_WIDTH, DX_HEIGHT);
     return viewer_init(exe, size);
 }
@@ -119,6 +133,8 @@ bool retro_load_game(const struct retro_game_info *game)
 void retro_unload_game(void)
 {
     viewer_deinit();
+    form_destroy();
+    config_close();
     texts_free();
     surface_free(&screen);
     free(exe);

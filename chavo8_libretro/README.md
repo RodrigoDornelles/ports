@@ -10,6 +10,8 @@ Load `Chaves.exe` from the game's folder, or a `.zip` holding that folder. The c
 - `library/delphix/`: what the game got from DelphiX and Windows: 16-bit surfaces, GDI canvas and text, DirectSound mixing; `pascal.nim` gives Delphi's integer and RTL semantics to the Nim ports.
 - `library/game/v1/`: the original releases, ported from their Delphi units in Nim; `library/chavo8.nim` builds every game into one static library linked into the core.
 
+The settings live in `chavo8.ini` of the frontend's save folder; without it, a `Chaves.dat` of the original beside the exe is read, as are the unlock files (`Churros.dat`, `Satanas.dat`, `SC01.dat`...).
+
 The font is [Comic Relief](https://github.com/loudifier/Comic-Relief) (OFL), metric-compatible with the Comic Sans MS the game took from Windows.
 
 ## State
