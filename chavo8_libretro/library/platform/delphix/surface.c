@@ -95,9 +95,17 @@ void dx_draw_alpha(surface_t *dst, int l, int t, int r, int b, const surface_t *
     }
 }
 
-/* GDI FillRect: right and bottom left out */
+static void order(int *l, int *t, int *r, int *b)
+{
+    if (*r < *l) { int s = *l; *l = *r; *r = s; }
+    if (*b < *t) { int s = *t; *t = *b; *b = s; }
+}
+
+/* GDI FillRect, a PatBlt: right and bottom left out, the rect put in order
+ * (the second player's bars run from right to left) */
 void canvas_fill_rect(surface_t *dst, int l, int t, int r, int b, uint32_t color)
 {
+    order(&l, &t, &r, &b);
     uint16_t c = dx_565(color);
     for (int y = t < 0 ? 0 : t; y < b && y < dst->h; y++)
         for (int x = l < 0 ? 0 : l; x < r && x < dst->w; x++)
@@ -115,10 +123,11 @@ void canvas_frame_rect(surface_t *dst, int l, int t, int r, int b, uint32_t colo
     canvas_fill_rect(dst, r - 1, t, r, b, color);
 }
 
-/* GDI RoundRect with a one pixel pen: corners are quarter ellipses of
- * w x h; the rasterization only approaches Windows' */
+/* GDI RoundRect with a one pixel pen, the rect put in order: corners are
+ * quarter ellipses of w x h; the rasterization only approaches Windows' */
 void canvas_round_rect(surface_t *dst, int l, int t, int r, int b, int w, int h, uint32_t pen, uint32_t brush)
 {
+    order(&l, &t, &r, &b);
     if (r - l < 2 || b - t < 2)
         return;
     double rx = w / 2.0, ry = h / 2.0;
@@ -144,8 +153,7 @@ static bool in_ellipse(double x, double y, double cx, double cy, double rx, doub
  * and the brush unless bsClear; the rasterization only approaches Windows' */
 void canvas_ellipse(surface_t *dst, int l, int t, int r, int b, uint32_t pen, uint32_t brush, bool hollow)
 {
-    if (r < l) { int s = l; l = r; r = s; }
-    if (b < t) { int s = t; t = b; b = s; }
+    order(&l, &t, &r, &b);
     if (r - l < 1 || b - t < 1)
         return;
     double cx = (l + r - 1) / 2.0, cy = (t + b - 1) / 2.0, rx = (r - l) / 2.0, ry = (b - t) / 2.0;
