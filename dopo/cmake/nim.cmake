@@ -84,3 +84,63 @@ function(dopo_nim_js name source output)
         COMMENT "nim: ${name}"
         VERBATIM)
 endfunction()
+
+# compiles the Nim module source, and what it imports, into C for the
+# target at configure time (--compileOnly), then that C into the static
+# library name, to be linked into a core; any .nim under the source's
+# folder that changes reconfigures. ARGN goes to nim.
+function(dopo_nim_library name source)
+    set(defines "")
+    if (EMSCRIPTEN)
+        set(cpu wasm32)
+        set(defines -d:emscripten)
+    else()
+        set(arch "${CMAKE_SYSTEM_PROCESSOR}")
+        if (ZIG_TARGET_TRIPLE)
+            string(REGEX REPLACE "-.*" "" arch "${ZIG_TARGET_TRIPLE}")
+        endif()
+        if (arch MATCHES "^(x86_64|amd64|AMD64)$")
+            set(cpu amd64)
+        elseif (arch MATCHES "^(aarch64|arm64)$")
+            set(cpu arm64)
+        elseif (arch MATCHES "^arm")
+            set(cpu arm)
+        elseif (arch MATCHES "^(i[3-6]86|x86)$")
+            set(cpu i386)
+        elseif (arch MATCHES "^riscv64$")
+            set(cpu riscv64)
+        else()
+            message(FATAL_ERROR "dopo: no Nim cpu for ${arch}")
+        endif()
+    endif()
+    set(cache "${CMAKE_BINARY_DIR}/dopo/nimcache/${name}")
+    execute_process(
+        COMMAND "${NIM_EXECUTABLE}" c --compileOnly --app:staticlib --noMain --os:linux --cpu:${cpu} ${defines}
+            --mm:arc -d:useMalloc --threads:off --exceptions:goto -d:noSignalHandler
+            -d:release --stackTrace:off --lineTrace:off --hints:off --warnings:off
+            "--nimcache:${cache}" ${ARGN} "${source}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error)
+    if (result)
+        message(FATAL_ERROR "dopo: failed to compile ${name} to C\n${output}${error}")
+    endif()
+    get_filename_component(project "${source}" NAME_WE)
+    file(READ "${cache}/lib${project}.json" manifest)
+    string(JSON count LENGTH "${manifest}" compile)
+    math(EXPR last "${count} - 1")
+    set(files "")
+    foreach(i RANGE ${last})
+        string(JSON file GET "${manifest}" compile ${i} 0)
+        list(APPEND files "${file}")
+    endforeach()
+    get_filename_component(dir "${source}" DIRECTORY)
+    file(GLOB_RECURSE nims CONFIGURE_DEPENDS "${dir}/*.nim")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${nims})
+    add_library(${name} STATIC ${files})
+    target_include_directories(${name} SYSTEM PRIVATE "${NIM_DIR}/lib")
+    # -fwrapv: with overflow checks off Nim emits plain C arithmetic, which
+    # must wrap like the languages ported from
+    target_compile_options(${name} PRIVATE -w -fwrapv -fno-strict-aliasing -fno-math-errno)
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endfunction()
