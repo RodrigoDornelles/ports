@@ -4,13 +4,18 @@
 ## variable sits at the address the disassembly shows. Those understood
 ## have a name; the others are reached as at(T, address) until they are.
 
-import ../../delphix/[pascal, delphix]
+import ../../delphix/[pascal, delphix, x86]
 
 const
   Base = 0x4b4488
   Size = 0x4b58b4 - Base
 
-var chavesVar* {.align(16).}: array[Size, uint8]
+var
+  chavesVar* {.align(16).}: array[Size, uint8]
+  outrasUnits* {.align(16).}: array[0x4b5900 - 0x4b58b4, uint8]  ## the other units' variables, after these
+
+map(Base, addr chavesVar, Size)
+map(0x4b58b4, addr outrasUnits, outrasUnits.len)
 
 template at*(T: typedesc, address: int): untyped =
   cast[ptr T](addr chavesVar[address - Base])[]

@@ -70,7 +70,7 @@ proc `/`*[B: SomeInteger | Small](a: Real, b: B): Real = a / Real(int64(b))
 proc `*`*[A: SomeInteger | Small](a: A, b: Real): Real = Real(int64(a)) * b
 proc `*`*[B: SomeInteger | Small](a: Real, b: B): Real = a * Real(int64(b))
 
-var RandSeed*: LongInt
+var RandSeed* {.exportc: "RandSeed".}: LongInt
 
 proc nextSeed() {.inline.} =
   RandSeed = cast[int32](cast[uint32](RandSeed) * 0x08088405'u32 + 1)
