@@ -30,6 +30,7 @@ bool texts_load(const uint8_t *exe, size_t size);
 void texts_free(void);
 size_t texts_count(int language, int memo);
 const char *texts_line(int language, int memo, size_t index);
+size_t exe_literal(uint32_t va, const char **text);
 
 /* the image and wave items of the form's TDXImageList and TDXWaveList
  * components, as the DFM stores them; data is empty for an item without

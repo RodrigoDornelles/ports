@@ -26,6 +26,10 @@ bool surface_from_image(surface_t *s, const image_t *img, bool transparent, uint
 void surface_free(surface_t *s);
 void dx_fill(surface_t *dst, uint32_t color);
 void dx_draw(surface_t *dst, int x, int y, const surface_t *src);
+void dx_draw_alpha(surface_t *dst, int l, int t, int r, int b, const surface_t *src, int alpha);
+void canvas_fill_rect(surface_t *dst, int l, int t, int r, int b, uint32_t color);
+void canvas_frame_rect(surface_t *dst, int l, int t, int r, int b, uint32_t color);
+void canvas_round_rect(surface_t *dst, int l, int t, int r, int b, int w, int h, uint32_t pen, uint32_t brush);
 
 /* TCanvas.Pixels: CLR_INVALID out of the bitmap, which splits into white */
 uint32_t canvas_pixel(const image_t *img, int x, int y);
@@ -49,7 +53,19 @@ enum {
 };
 enum { WAVES_SND, WAVES_MUSICA, WAVES_VITORIA, WAVE_LISTS };
 
+/* TDXInput: the keyboard (player 1) and the joystick (player 2), each a set
+ * of states as bits: isUp, isDown, isLeft, isRight, isButton1.. from 0 */
+enum { DX_KEYBOARD, DX_JOYSTICK, DX_DEVICES };
+
 bool form_create(const uint8_t *exe, size_t size);
+surface_t *dx_screen(void);
+uint32_t form_image_pixel(int image, int x, int y);
+void dx_images_draw(int list, int index, int x, int y);
+void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha);
+void dx_waves_play(int list, int index);
+void dx_input_set(int device, uint32_t states);
+void dx_input_update(void);
+uint32_t dx_input_states(int device);
 void form_destroy(void);
 image_t *form_image(int image);
 bool form_image_load(int image, const char *name);
@@ -57,6 +73,7 @@ void form_image_resize(int image, int w, int h);
 int dx_images_add(int list);
 int dx_images_count(int list);
 void dx_images_assign(int list, int index, int image, bool transparent, uint32_t color);
+bool dx_images_load(int list, int index, const char *name, bool transparent, uint32_t color);
 const surface_t *dx_images_get(int list, int index);
 int dx_waves_add(int list);
 int dx_waves_count(int list);

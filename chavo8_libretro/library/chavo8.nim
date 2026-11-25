@@ -17,6 +17,24 @@ proc chavo8_v1_line(idioma: cint, memo: cint, index: cint): cstring {.exportc, c
 proc chavo8_v1_create() {.exportc, cdecl.} =
   FormCreate()
 
+## a frame of the frontend: the keys pressed since the last, then OnTimer
+## if DXTimer1 is on; its interval, the ms the frame lasts
+proc chavo8_v1_frame(keys: ptr UncheckedArray[uint16], count: cint): cint {.exportc, cdecl.} =
+  for i in 0 ..< count: FormKeyDown(Word(keys[i]))
+  if TimerEnabled: DXTimer1Timer()
+  TimerInterval
+
+## the keys of the frontend's pad that put a coin in and start: only on the
+## screens where 1 or 2 enter (FormKeyDown) and for a player not in the game,
+## the coin only when there is no credit
+proc chavo8_v1_start(p: cint, keys: ptr UncheckedArray[uint16]): cint {.exportc, cdecl.} =
+  if jogador[p].jogando != 0 or not (tela == 1 or tela == 4 or tela == 7 or tela == 8): return 0
+  if creditos == 0:
+    keys[result] = uint16('5')
+    inc result
+  keys[result] = uint16(if p == 1: '1' else: '2')
+  inc result
+
 var estado: string
 
 ## what FormCreate left, a line each, for the viewer

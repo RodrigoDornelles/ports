@@ -27,6 +27,11 @@ converter toInteger*(x: Word): Integer = Integer(uint16(x))
 converter toInteger*(x: ShortInt): Integer = Integer(int8(x))
 converter toInteger*(x: SmallInt): Integer = Integer(int16(x))
 
+## an Int64 (Round's result) or a Nim int (a for loop's) given where an
+## Integer goes keeps its low 32 bits, as Delphi passes it unchecked
+converter toInteger*(x: Int64): Integer = cast[int32](uint32(x and 0xFFFF_FFFF))
+converter toInteger*(x: int): Integer = cast[int32](uint32(int64(x) and 0xFFFF_FFFF))
+
 type Small* = Byte | Word | ShortInt | SmallInt
 
 proc `:=`*[T: Small, V: SomeInteger | Small](dst: var T, v: V) =
@@ -46,6 +51,11 @@ proc `:=`*[V: SomeInteger | Small](dst: var Real, v: V) = dst = Real(int64(v))
 proc `:=`*(dst: var Real, v: Real) = dst = v
 
 proc `$`*(x: Byte | Word | ShortInt | SmallInt): string = $Integer(x)
+
+## / is always a real division in Pascal
+proc `/`*[A, B: SomeInteger | Small](a: A, b: B): Real = Real(int64(a)) / Real(int64(b))
+proc `/`*[A: SomeInteger | Small](a: A, b: Real): Real = Real(int64(a)) / b
+proc `/`*[B: SomeInteger | Small](a: Real, b: B): Real = a / Real(int64(b))
 
 var RandSeed*: LongInt
 
@@ -160,6 +170,7 @@ when isMainModule:
   doAssert Round(2.5) == 2 and Round(3.5) == 4 and Round(-2.5) == -2 and Round(2.6) == 3
   doAssert Trunc(-2.7) == -2 and Trunc(2.7) == 2
   doAssert Int(-2.7) == -2.0 and Int(2.7) == 2.0
+  doAssert SmallInt(7) / 2 == 3.5 and Byte(1) / 4 == 0.25
   doAssert Cos(0.0) == 1.0 and Cos(1e19) == 0.0
   doAssert StrToInt(" 42") == 42 and StrToInt("-7") == -7 and StrToInt("$1F") == 31 and StrToInt("0x10") == 16
   doAssert StrToInt("-2147483648") == low(Integer)

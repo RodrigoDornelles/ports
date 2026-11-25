@@ -179,3 +179,12 @@ const char *texts_line(int language, int memo, size_t index)
 {
     return index < texts_count(language, memo) ? memos[language != 1][memo].line[index] : "";
 }
+
+/* a string literal of the exe's code, by its address */
+size_t exe_literal(uint32_t va, const char **text)
+{
+    const uint8_t *len = exe_data ? pe_va(exe_data, exe_size, va - 4, 4) : NULL;
+    const uint8_t *s = len ? pe_va(exe_data, exe_size, va, u32(len)) : NULL;
+    *text = s ? (const char *)s : "";
+    return s ? u32(len) : 0;
+}

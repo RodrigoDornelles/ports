@@ -24,6 +24,8 @@ static struct {
         sound_t *item;
         int count;
     } waves[WAVE_LISTS];
+    surface_t screen;
+    uint32_t input[DX_DEVICES], states[DX_DEVICES];
 } form;
 
 static const char *list_name[IMAGE_LISTS] = {
@@ -65,12 +67,14 @@ static void from_dfm(void *ctx, const dfm_item_t *item)
 bool form_create(const uint8_t *exe, size_t size)
 {
     form_destroy();
+    surface_new(&form.screen, DX_WIDTH, DX_HEIGHT);
     blob_t dfm;
     return pe_resource(exe, size, 10, "TFORM1", &dfm) && dfm_items(dfm.data, dfm.size, from_dfm, NULL);
 }
 
 void form_destroy(void)
 {
+    surface_free(&form.screen);
     for (int i = 0; i < FORM_IMAGES; i++)
         image_free(&form.image[i]);
     for (int l = 0; l < IMAGE_LISTS; l++) {
@@ -192,4 +196,72 @@ const wave_t *dx_waves_get(int list, int index)
     if (index < 0 || index >= form.waves[list].count || !form.waves[list].item[index].ok)
         return NULL;
     return &form.waves[list].item[index].wave;
+}
+
+surface_t *dx_screen(void)
+{
+    return &form.screen;
+}
+
+uint32_t form_image_pixel(int image, int x, int y)
+{
+    return canvas_pixel(&form.image[image], x, y);
+}
+
+void dx_images_draw(int list, int index, int x, int y)
+{
+    const surface_t *s = dx_images_get(list, index);
+    if (s)
+        dx_draw(&form.screen, x, y, s);
+}
+
+void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha)
+{
+    const surface_t *s = dx_images_get(list, index);
+    if (s)
+        dx_draw_alpha(&form.screen, l, t, r, b, s, alpha);
+}
+
+/* Items[index].Play: each call plays the wave once more, over the others */
+void dx_waves_play(int list, int index)
+{
+    const wave_t *w = dx_waves_get(list, index);
+    if (w)
+        dx_play(w, false);
+}
+
+void dx_input_set(int device, uint32_t states)
+{
+    form.input[device] = states;
+}
+
+void dx_input_update(void)
+{
+    memcpy(form.states, form.input, sizeof form.states);
+}
+
+uint32_t dx_input_states(int device)
+{
+    return device < DX_DEVICES ? form.states[device] : form.states[DX_KEYBOARD] | form.states[DX_JOYSTICK];
+}
+
+/* Items[index].Picture.LoadFromFile, Transparent, TransparentColor, Restore */
+bool dx_images_load(int list, int index, const char *name, bool transparent, uint32_t color)
+{
+    if (index < 0 || index >= form.list[list].count)
+        return false;
+    size_t size;
+    uint8_t *data = vfs_load(name, &size);
+    image_t img;
+    bool ok = data && image_bmp(data, size, &img);
+    free(data);
+    if (!ok) {
+        chavo8_log("cannot load the picture %s\n", name);
+        return false;
+    }
+    surface_t *s = &form.list[list].item[index].surface;
+    surface_free(s);
+    surface_from_image(s, &img, transparent, color);
+    image_free(&img);
+    return true;
 }

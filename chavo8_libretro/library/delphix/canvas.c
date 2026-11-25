@@ -47,7 +47,9 @@ void canvas_copy_rect(image_t *dst, int dl, int dt, int dr, int db,
 }
 
 /* GDI asks for -MulDiv(Size, 96, 72) pixels of em; glyphs are kept by
- * size and drawn without smoothing, as on the 16-bit display */
+ * size and drawn without smoothing, as on the 16-bit display. A pixel is
+ * set from 96/255 of coverage: half would lose the thin strokes (a hyphen at
+ * 8 points) that the hinted, dropout-controlled GDI glyphs keep */
 #define MAX_SIZE 128
 
 typedef struct {
@@ -118,7 +120,7 @@ void canvas_text_out(surface_t *dst, int x, int y, uint32_t color, int size, con
                 continue;
             for (int i = 0; i < g->w; i++) {
                 int px = x + g->xoff + i;
-                if (px >= 0 && px < dst->w && g->bitmap[j * g->w + i] >= 128)
+                if (px >= 0 && px < dst->w && g->bitmap[j * g->w + i] >= 96)
                     dst->px[(size_t)py * dst->w + px] = c565;
             }
         }

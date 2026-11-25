@@ -12,7 +12,30 @@ const
 
 template chao*: untyped = at(SmallInt, 0x4b4498)  ## the floor's y, 300
 
-var MemoConfigSalvo*: seq[string]
+var
+  MemoConfigSalvo*: seq[string]
+  versao*: string
+
+## FillRect with the brush's color, right and bottom out
+proc barra*(x1, y1, x2, y2: Integer, cor: TColor) =
+  FillRect(Rect(x1, y1, x2, y2), cor)
+
+## FrameRect, drawn again from the right when x1 is past x2
+proc retangulo*(x1, y1, x2, y2: Integer, cor: TColor) =
+  FrameRect(Rect(x1, y1, x2, y2), cor)
+  if x1 > x2: FrameRect(Rect(x2, y1, x1, y2), cor)
+
+proc barraredonda*(x1, y1, x2, y2, raio: Integer, borda, cor: TColor) =
+  RoundRect(x1, y1, x2, y2, raio, raio, borda, cor)
+
+## Comic Sans MS with a black shadow a pixel down and right; alinhamento 'c'
+## centers on x, 'e' ends at x, anything else starts at it
+proc texto*(x, y: Integer, s: string, alinhamento: char, tamanho: Integer, cor: TColor) =
+  var desloca: Integer = 0
+  if alinhamento == 'c': desloca := Round(TextWidth(s, tamanho) / 2)
+  if alinhamento == 'e': desloca := TextWidth(s, tamanho)
+  TextOut(x - desloca + 1, y + 1, s, tamanho, RGB(0, 0, 0))
+  TextOut(x - desloca, y, s, tamanho, cor)
 
 proc zerardados*(p: Byte) =
   let j = jogador[p]
@@ -124,7 +147,79 @@ proc carregarosto*(nome: string, lado: Byte) =
     if lado == 1: DXImageListRetrato.Assign(i, ImageRetrato, true, branco)
     if lado == 2: DXImageListRetrato.Assign(i, ImageRetratoInvert, true, branco)
 
-proc numerado(prefixo: string, i: int, sufixo: string): string =
+## a frame of the fighter's strip, all rows but the last, and its mirror
+proc copiabmp*(indice, x1, y1, x2, y2: Integer) =
+  let w = x2 - x1
+  let h = y2 - y1
+  ImageLutadorFrame.Width = w
+  ImageLutadorFrame.Height = h
+  CopyRect(ImageLutadorFrame, Rect(0, 0, w, h), ImageLutador, Rect(x1, y1, x2, y2))
+  DXImageListLutador.Assign(indice, ImageLutadorFrame, true, branco)
+  CopyRect(ImageLutadorFrame, Rect(0, 0, w, h), ImageLutador, Rect(x2 - 1, y1, x1, y2))
+  DXImageListLutadorInvert.Assign(indice, ImageLutadorFrame, true, branco)
+
+## the strip's frames end at columns dark (R, G and B up to 100) at the top
+## and bottom rows; past the right edge Pixels reads white, so a strip ends
+## at its last dark column. Player 1's frames go from item 1, player 2's 51
+proc carregarlutador*(nome: string, personagem: Byte, p: Byte) =
+  if FileSearch(nome, ".") != "":
+    ImageLutador.LoadFromFile(nome)
+    var base: Byte
+    if p == 1: base := 0
+    if p == 2: base := 50
+    let j = jogador[p]
+    j.personagem := personagem
+    if personagem == 1: j.altura := 156
+    if j.personagem == 2: j.altura := 162
+    if j.personagem == 3: j.altura := 147
+    if j.personagem == 4: j.altura := 149
+    if j.personagem == 5: j.altura := 144
+    if j.personagem == 6: j.altura := 190
+    if j.personagem == 7: j.altura := 160
+    if j.personagem == 8: j.altura := 160
+    if j.personagem == 9: j.altura := 150
+    if j.personagem == 10: j.altura := 155
+    if j.personagem == 11: j.altura := 155
+    if j.personagem == 12: j.altura := 165
+    if j.personagem == 13: j.altura := 155
+    if j.personagem == 14: j.altura := 160
+    if j.personagem == 15: j.altura := 165
+    var inicio: SmallInt
+    var quadro: Byte
+    inicio := 0
+    quadro := 1
+    var largura, altura: SmallInt
+    largura := ImageLutador.Width
+    altura := ImageLutador.Height
+    var x: SmallInt
+    x := 0
+    while x <= largura:
+      let cima = ImageLutador.Pixels(x, 0)
+      let baixo = ImageLutador.Pixels(x, altura - 1)
+      if GetRValue(cima) <= 100 and GetGValue(cima) <= 100 and GetBValue(cima) <= 100 and
+          GetRValue(baixo) <= 100 and GetGValue(baixo) <= 100 and GetBValue(baixo) <= 100:
+        copiabmp(quadro + base, inicio, 0, x - 1, altura - 1)
+        inc quadro
+        inicio := x + 1
+      inc x
+  TimerEnabled = true
+
+proc carregarcenario*(nome: string) =
+  TimerEnabled = false
+  if FileSearch(nome, ".") != "":
+    DXImageListCenario.LoadFromFile(0, nome, false, branco)
+  at(Byte, 0x4b57d8 + 0x18) := 0
+  if cenario == 2:
+    at(Integer, 0x4b57d8) := 395
+    at(Integer, 0x4b57d8 + 0x04) := 195
+    at(Integer, 0x4b57d8 + 0x08) := 25
+    at(Integer, 0x4b57d8 + 0x0c) := 25
+    at(Integer, 0x4b57d8 + 0x10) := 110
+    at(Integer, 0x4b57d8 + 0x14) := 90
+    at(Byte, 0x4b57d8 + 0x18) := 6
+  TimerEnabled = true
+
+proc numerado*(prefixo: string, i: int, sufixo: string): string =
   prefixo & $i & sufixo
 
 ## the settings, from chavo8.ini or else the original's Chaves.dat; StrToInt
@@ -183,6 +278,7 @@ proc FormCreate*() =
     if i < 10 and FileSearch(numerado("SC0", i, ".dat"), ".") != "": sc := i
     if i >= 10 and FileSearch(numerado("SC", i, ".dat"), ".") != "": sc := i
 
+  versao = lit(0x49dff4)
   at(Integer, 0x4b4488) := 0
   at(Integer, 0x4b448c) := 0
   at(Integer, 0x4b4490) := 0

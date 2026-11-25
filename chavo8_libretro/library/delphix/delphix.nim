@@ -92,6 +92,12 @@ proc Count*(list: TDXImageList): Integer = dx_images_count(cint(ord(list)))
 proc Assign*(list: TDXImageList, index: Integer, image: TImage, transparent: bool, color: TColor) =
   dx_images_assign(cint(ord(list)), index, cint(ord(image)), transparent, color)
 
+proc dx_images_load(list, index: cint, name: cstring, transparent: bool, color: uint32): bool {.importc, cdecl.}
+
+## Items[index].Picture.LoadFromFile; Transparent; TransparentColor; Restore
+proc LoadFromFile*(list: TDXImageList, index: Integer, name: string, transparent: bool, color: TColor) =
+  discard dx_images_load(cint(ord(list)), index, cstring(name), transparent, color)
+
 proc Add*(list: TDXWaveList) = discard dx_waves_add(cint(ord(list)))
 proc Count*(list: TDXWaveList): Integer = dx_waves_count(cint(ord(list)))
 
@@ -107,3 +113,81 @@ proc ConfigLines*(keys: openArray[string]): seq[string] =
     let value = config_get(cstring(key))
     if value == nil: break
     result.add $value
+
+proc exe_literal(va: uint32, text: ptr cstring): csize_t {.importc, cdecl.}
+
+## a string literal of the exe's code, by the address the disassembly shows,
+## so the game's own words come from the exe (and a mod's edited ones too)
+proc lit*(va: int): string =
+  var text: cstring
+  let n = exe_literal(uint32(va), addr text)
+  result = newString(n)
+  if n > 0: copyMem(addr result[0], text, n)
+
+type
+  TDXInputState* = enum
+    isUp, isDown, isLeft, isRight, isButton1, isButton2, isButton3, isButton4,
+    isButton5, isButton6, isButton7, isButton8, isButton9, isButton10, isButton11, isButton12
+  TDXInputDevice* = enum
+    Keyboard, Joystick, Bound
+
+proc dx_input_update() {.importc, cdecl.}
+proc dx_input_states(device: cint): uint32 {.importc, cdecl.}
+
+## DXInput1.Update: the states read until the next one
+proc Update*() = dx_input_update()
+
+## Keyboard.States (player 1), Joystick.States (player 2), Bound: DXInput1.States
+proc States*(device: TDXInputDevice): set[TDXInputState] =
+  let bits = dx_input_states(cint(ord(device)))
+  for s in TDXInputState:
+    if (bits shr ord(s) and 1) != 0: result.incl s
+
+proc dx_screen(): pointer {.importc, cdecl.}
+proc canvas_fill_rect(dst: pointer, l, t, r, b: cint, color: uint32) {.importc, cdecl.}
+proc canvas_frame_rect(dst: pointer, l, t, r, b: cint, color: uint32) {.importc, cdecl.}
+proc canvas_round_rect(dst: pointer, l, t, r, b, w, h: cint, pen, brush: uint32) {.importc, cdecl.}
+proc canvas_text_out(dst: pointer, x, y: cint, color: uint32, size: cint, text: cstring) {.importc, cdecl.}
+proc canvas_text_width(size: cint, text: cstring): cint {.importc, cdecl.}
+proc form_image_pixel(image, x, y: cint): uint32 {.importc, cdecl.}
+proc dx_images_draw(list, index, x, y: cint) {.importc, cdecl.}
+proc dx_images_draw_alpha(list, index, l, t, r, b, alpha: cint) {.importc, cdecl.}
+proc dx_waves_play(list, index: cint) {.importc, cdecl.}
+
+## DXDraw1.Surface.Canvas, with GDI's brush, pen and font
+proc FillRect*(r: TRect, brush: TColor) =
+  canvas_fill_rect(dx_screen(), r.Left, r.Top, r.Right, r.Bottom, brush)
+
+proc FrameRect*(r: TRect, brush: TColor) =
+  canvas_frame_rect(dx_screen(), r.Left, r.Top, r.Right, r.Bottom, brush)
+
+proc RoundRect*(x1, y1, x2, y2, x3, y3: Integer, pen, brush: TColor) =
+  canvas_round_rect(dx_screen(), x1, y1, x2, y2, x3, y3, pen, brush)
+
+proc TextOut*(x, y: Integer, text: string, size: Integer, color: TColor) =
+  canvas_text_out(dx_screen(), x, y, color, size, cstring(text))
+
+proc TextWidth*(text: string, size: Integer): Integer =
+  canvas_text_width(size, cstring(text))
+
+proc Pixels*(image: TImage, x, y: Integer): TColor =
+  form_image_pixel(cint(ord(image)), x, y)
+
+proc GetRValue*(c: TColor): Byte = Byte(uint8(c and 0xFF))
+proc GetGValue*(c: TColor): Byte = Byte(uint8(c shr 8 and 0xFF))
+proc GetBValue*(c: TColor): Byte = Byte(uint8(c shr 16 and 0xFF))
+
+## Items[index].Draw(DXDraw1.Surface, x, y, 0)
+proc Draw*(list: TDXImageList, index, x, y: Integer) =
+  dx_images_draw(cint(ord(list)), index, x, y)
+
+## Items[index].DrawAlpha(DXDraw1.Surface, rect, 0, alpha)
+proc DrawAlpha*(list: TDXImageList, index: Integer, r: TRect, alpha: Integer) =
+  dx_images_draw_alpha(cint(ord(list)), index, r.Left, r.Top, r.Right, r.Bottom, alpha)
+
+proc Play*(list: TDXWaveList, index: Integer) =
+  dx_waves_play(cint(ord(list)), index)
+
+## DXTimer1: the frontend runs OnTimer while enabled, at Interval ms
+var TimerEnabled* = true
+var TimerInterval*: Integer = 1
