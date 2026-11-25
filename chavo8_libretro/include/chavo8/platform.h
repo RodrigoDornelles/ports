@@ -19,6 +19,16 @@ typedef struct {
 } blob_t;
 
 bool pe_resource(const uint8_t *exe, size_t size, unsigned type, const char *name, blob_t *out);
+const uint8_t *pe_va(const uint8_t *exe, size_t size, uint32_t va, size_t len);
+bool pe_code(const uint8_t *exe, size_t size, blob_t *code, uint32_t *va);
+
+/* the lines ChavesTexto puts in the form's memos, read from its code:
+ * Portuguese is language 1, anything else Spanish, as the game decides */
+enum { MEMO_NOMES, MEMO_TEXTO, MEMO_CONFIG, MEMO_FRASES, MEMO_DIALOGO, MEMO_FINAIS, MEMO_CENARIOS, MEMOS };
+bool texts_load(const uint8_t *exe, size_t size);
+void texts_free(void);
+size_t texts_count(int language, int memo);
+const char *texts_line(int language, int memo, size_t index);
 
 /* the image and wave items of the form's TDXImageList and TDXWaveList
  * components, as the DFM stores them */

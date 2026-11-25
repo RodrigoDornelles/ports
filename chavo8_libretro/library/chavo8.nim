@@ -8,3 +8,7 @@ proc chavo8_game_name(version: cint): cstring {.exportc, cdecl.} =
   case version
   of 1: cstring(v1.name)
   else: nil
+
+proc chavo8_v1_line(idioma: cint, memo: cint, index: cint): cstring {.exportc, cdecl.} =
+  CarregarTexto(Byte(uint8(idioma)))
+  Lines(Memo(memo), index)

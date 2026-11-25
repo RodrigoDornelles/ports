@@ -110,6 +110,8 @@ bool retro_load_game(const struct retro_game_info *game)
     if (!pe_resource(exe, size, 10, "PACKAGEINFO", &units)
         || !contains(&units, "ChavesGolpes"))
         chavo8_log("%s does not look like Street Chaves (no ChavesGolpes unit)\n", vfs_exe());
+    if (!texts_load(exe, size))
+        chavo8_log("%s: the texts were not found in its code\n", vfs_exe());
     surface_new(&screen, DX_WIDTH, DX_HEIGHT);
     return viewer_init(exe, size);
 }
@@ -117,6 +119,7 @@ bool retro_load_game(const struct retro_game_info *game)
 void retro_unload_game(void)
 {
     viewer_deinit();
+    texts_free();
     surface_free(&screen);
     free(exe);
     exe = NULL;

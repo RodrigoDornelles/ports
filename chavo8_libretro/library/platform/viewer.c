@@ -7,7 +7,7 @@
 #include "chavo8/game.h"
 #include "chavo8/viewer.h"
 
-enum { LUTADORES, CENARIOS, ROSTOS, EFEITOS, ANIMACOES, EXE_IMAGES, SONS, FALAS, MUSICAS, EXE_WAVES, FONTE, CATEGORIES };
+enum { LUTADORES, CENARIOS, ROSTOS, EFEITOS, ANIMACOES, EXE_IMAGES, SONS, FALAS, MUSICAS, EXE_WAVES, TEXTOS, FONTE, CATEGORIES };
 
 static const struct {
     const char *title, *dir, *ext;
@@ -22,6 +22,7 @@ static const struct {
     [FALAS] = { "Falas", "Falas", ".wav" },
     [MUSICAS] = { "Musicas", "Musicas", ".wav" },
     [EXE_WAVES] = { "Sons do exe", NULL, NULL },
+    [TEXTOS] = { "Textos do exe", NULL, NULL },
     [FONTE] = { "Fonte", NULL, NULL },
 };
 
@@ -87,6 +88,7 @@ bool viewer_init(const uint8_t *exe, size_t size)
             if (ends_with(names[i], category[c].ext))
                 v.files[c][v.count[c]++] = names[i];
     }
+    v.count[TEXTOS] = 2 * MEMOS;
     v.count[FONTE] = 1;
     load();
     return true;
@@ -207,6 +209,25 @@ static void checkers(surface_t *s)
             s->px[(size_t)y * s->w + x] = ((x >> 3) ^ (y >> 3)) & 1 ? dx_565(0x404040) : dx_565(0x303030);
 }
 
+static const char *memo_name[MEMOS] = {
+    "MemoNomes", "MemoTexto", "MemoConfig", "MemoFrases", "MemoDialogo", "MemoFinais", "MemoCenarios",
+};
+
+/* through game/v1 (chavo8_v1_line), as the game will read them */
+static void draw_texts(surface_t *s)
+{
+    int idioma = v.index[TEXTOS] < MEMOS ? 1 : 2, memo = (int)(v.index[TEXTOS] % MEMOS);
+    size_t count = texts_count(idioma, memo);
+    if (v.scroll >= (int)count)
+        v.scroll = count ? (int)count - 1 : 0;
+    for (int row = 0, y = 24; row < 15 && v.scroll + row < (int)count; row++, y += 15) {
+        char text[300];
+        snprintf(text, sizeof text, "%3d  %s", v.scroll + row, chavo8_v1_line(idioma, memo, v.scroll + row));
+        label(s, 8, y, 0xFFFFFF, '-', 8, text);
+    }
+    snprintf(v.info, sizeof v.info, "%s, %zu linhas  (cima/baixo rola)", idioma == 1 ? "portugues" : "espanhol", count);
+}
+
 static void draw_font(surface_t *s)
 {
     static const int sizes[] = { 7, 8, 9, 10, 11, 12, 15, 20, 25 };
@@ -233,7 +254,12 @@ void viewer_run(uint16_t buttons, surface_t *screen)
         v.index[c] = (v.index[c] + (PRESSED(RIGHT) ? 1 : v.count[c] - 1)) % v.count[c];
         load();
     }
-    if (c == CENARIOS && v.nframes) {
+    if (c == TEXTOS) {
+        if (PRESSED(UP))
+            v.scroll -= v.scroll > 0;
+        if (PRESSED(DOWN))
+            v.scroll++;
+    } else if (c == CENARIOS && v.nframes) {
         if (buttons & (1 << RETRO_DEVICE_ID_JOYPAD_UP))
             v.scroll -= 4;
         if (buttons & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN))
@@ -262,7 +288,9 @@ void viewer_run(uint16_t buttons, surface_t *screen)
         v.frame = (v.frame + 1) % v.nframes;
 
     checkers(screen);
-    if (c == FONTE) {
+    if (c == TEXTOS) {
+        draw_texts(screen);
+    } else if (c == FONTE) {
         draw_font(screen);
     } else if (v.nframes) {
         surface_t *s = (v.mirror && v.inverts[v.frame].px ? v.inverts : v.frames) + v.frame;
@@ -278,6 +306,7 @@ void viewer_run(uint16_t buttons, surface_t *screen)
     char head[512];
     const char *name = !v.count[c] ? "(vazio)"
         : c == EXE_IMAGES || c == EXE_WAVES ? v.exe_items[c == EXE_WAVES][v.index[c]].label
+        : c == TEXTOS ? memo_name[v.index[c] % MEMOS]
         : category[c].dir ? v.files[c][v.index[c]] : "Comic Relief";
     snprintf(head, sizeof head, "%s  %zu/%zu  %s", category[c].title, v.count[c] ? v.index[c] + 1 : 0, v.count[c], name);
     label(screen, 6, 4, 0xFFFFFF, '-', 9, head);
