@@ -24,9 +24,9 @@ proc tela0() =
   if piscar <= 5: cor = RGB(255, 255, 255)
   if piscar > 5 and piscar <= 10: cor = RGB(225, 225, 225)
   if piscar > 10: cor = RGB(195, 195, 195)
-  if resolucao == 1: texto(200, 130, lit(0x4aebe0), 'c', 10, cor)
-  if resolucao == 2: texto(200, 150, lit(0x4aebf0), 'c', 10, cor)
-  if resolucao == 3: texto(200, 170, lit(0x4aec08), 'c', 10, cor)
+  if opcao == 1: texto(200, 130, lit(0x4aebe0), 'c', 10, cor)
+  if opcao == 2: texto(200, 150, lit(0x4aebf0), 'c', 10, cor)
+  if opcao == 3: texto(200, 170, lit(0x4aec08), 'c', 10, cor)
   DXImageListIcone.Draw(0, 150, 220)
   DXImageListIcone.Draw(1, 165, 220)
   texto(200, 220, lit(0x4aec20), 'c', 7, RGB(255, 255, 255))
@@ -35,12 +35,12 @@ proc tela0() =
   if piscar <= 8: cor = RGB(255, 150, 150)
   texto(200, 270, lit(0x4aec54), 'c', 8, cor)
   Update()
-  if isUp in Keyboard.States and jogador[1].antes(isUp) == 0: dec resolucao
-  if isDown in Keyboard.States and jogador[1].antes(isDown) == 0: inc resolucao
-  if isUp in Joystick.States and jogador[2].antes(isUp) == 0: dec resolucao
-  if isDown in Joystick.States and jogador[2].antes(isDown) == 0: inc resolucao
-  if resolucao < 1: resolucao := 1
-  if resolucao > 3: resolucao := 3
+  if isUp in Keyboard.States and jogador[1].antes(isUp) == 0: dec opcao
+  if isDown in Keyboard.States and jogador[1].antes(isDown) == 0: inc opcao
+  if isUp in Joystick.States and jogador[2].antes(isUp) == 0: dec opcao
+  if isDown in Joystick.States and jogador[2].antes(isDown) == 0: inc opcao
+  if opcao < 1: opcao := 1
+  if opcao > 3: opcao := 3
   if isButton1 in Bound.States:
     # TELA CHEIA (1) and (2) set the display mode: the frontend's
     tela := 1
@@ -131,13 +131,13 @@ proc tela1() =
     tela := 7
     tempodemo := 600
     at(Byte, 0x4b44e0) := 0
-    at(Byte, 0x4b44e3) := 99
-    at(Byte, 0x4b44e4) := 25
+    tempo := 99
+    quadros := 25
     at(Byte, 0x4b44de) := 72
     at(Byte, 0x4b44df) := 0
-    jogador[1].at(Byte, 0x9e) := 0
+    jogador[1].jogando := 0
     jogador[1].at(Byte, 0x6b) := 1
-    jogador[2].at(Byte, 0x9e) := 0
+    jogador[2].jogando := 0
     jogador[2].at(Byte, 0x6b) := 1
     zerardados(Byte(1))
     zerardados(Byte(2))
@@ -168,6 +168,117 @@ proc tela1() =
   if piscar < 12 and creditos == 0: texto(200, 235, linha(6), 'c', 10, RGB(255, 255, 255))
   if piscar < 12 and creditos > 0: texto(200, 235, linha(7), 'c', 10, RGB(255, 255, 255))
 
+## the selection: the portraits slide in, each player moves a cursor over
+## them and confirms with the first button, before the countdown ends
+proc tela4() =
+  at(Byte, 0x4b44e0) := 0
+  if musicaatual != 0 and DXWaveListMusica.Count > 0: DXWaveListMusica.Stop(0)
+  barra(0, 0, 400, 300, RGB(0, 0, 0))
+  barra(0, 300 - contador, 200, 600 - contador, RGB(120, 120, 255))
+  barra(200, contador - 300, 400, contador, RGB(255, 100, 100))
+  for i in 0 .. 3:
+    for j in 0 .. 1:
+      for (l, icone) in [(1, 11), (2, 12)]:
+        if linguagem == l:
+          DXImageListIcone.Draw(icone, i * 145 - 67, j * 200 - 200 + quadros * 8)
+          DXImageListIcone.Draw(icone, i * 145, j * 200 - 100 + quadros * 8)
+  let k = Round(contador * 1.35)
+  barra(k - 410, 156, k, 290, RGB(30, 50, 70))
+  barra(k - 410, 158, k, 160, RGB(255, 255, 255))
+  barra(k - 410, 286, k, 288, RGB(255, 255, 255))
+  for i in 0 .. 14:
+    var x: Integer
+    if i < 8: x := k + i * 49 - 402
+    if i >= 8: x := k + (i - 8) * 49 - 402
+    if DXImageListRetrato.Count > i * 5:
+      if i < 8: DXImageListRetrato.DrawAlpha(i * 5, Rect(x, 163, x + 50, 223), 60)
+      if i >= 8: DXImageListRetrato.DrawAlpha(i * 5, Rect(x, 223, x + 50, 283), 60)
+  if fase == 1:
+    contador := contador + 20
+    if contador >= 300:
+      contador := 300
+      fase := 2
+  if fase == 2:
+    for (p, grande, nome) in [(1, 52, 100), (2, 252, 300)]:
+      let j = jogador[p]
+      if j.jogando == 1:
+        let r = (j.personagem - 1) * 5
+        if DXImageListRetrato.Count > r + 4: DXImageListRetrato.Draw(r + 4, grande, 25)
+        if DXImageListRetrato.Count > r and j.escolheu == 0:
+          if j.personagem <= 8: DXImageListRetrato.Draw(r, Integer(Round(contador * 1.35)) + (j.personagem - 1) * 49 - 402, 163)
+          if j.personagem > 8: DXImageListRetrato.Draw(r, Integer(Round(contador * 1.35)) + (j.personagem - 9) * 49 - 402, 223)
+        texto(nome, 130 - Round(Cos(piscar / 4.3) * 4.0), $Lines(MemoNomes, j.personagem), 'c', 12,
+          RGB(180, 220, 160))
+    var v: Byte
+    v := Round(Cos(quadros / 4.0) * 20.0) + 230
+    var cor = RGB(v, v, 255)
+    texto(200, Round(contador * 0.3) - 96, linha(8), 'c', 18, cor)
+    cor = RGB(250, 150, 150)
+    if tempo <= 5 and Int(quadros / 2) == quadros / 2: cor = RGB(250, 220, 220)
+    texto(200, 15, IntToStr(tempo), 'c', 22, cor)
+    if tempo >= 1:
+      dec quadros
+      if quadros == 0:
+        dec tempo
+        quadros := 25
+    inc piscar
+    if piscar >= 25: piscar := 0
+    for p in 1 .. 2:
+      let j = jogador[p]
+      if j.jogando == 1 and j.escolheu == 0:
+        var x: Integer = 10
+        zoom := 20
+        if j.personagem <= 8:
+          x := (j.personagem - 1) * 49 + 3
+          zoom := 160
+        if j.personagem > 8:
+          x := (j.personagem - 9) * 49 + 3
+          zoom := 220
+        var sombra: TColor
+        if Int(piscar / 2) == piscar / 2: sombra = RGB(50, 50, 50) else: sombra = RGB(0, 0, 0)
+        if p == 1: texto(x, zoom, IntToStr(p) & lit(0x4aeef8), '-', 10, RGB(100, 100, 200) + sombra)
+        if p == 2: texto(x + 35, zoom, IntToStr(p) & lit(0x4aeef8), '-', 10, RGB(200, 50, 50) + sombra)
+    Update()
+    for (p, d) in [(1, Keyboard), (2, Joystick)]:
+      let j = jogador[p]
+      if j.escolheu == 0 and j.jogando == 1:
+        let s = d.States
+        if isLeft in s and j.antes(isLeft) == 0:
+          dec j.personagem
+          if DXWaveListSnd.Count - 1 > 0: DXWaveListSnd.Play(1)
+        if isRight in s and j.antes(isRight) == 0:
+          inc j.personagem
+          if DXWaveListSnd.Count - 1 > 0: DXWaveListSnd.Play(1)
+        if isUp in s and j.antes(isUp) == 0 and j.personagem > 8:
+          j.personagem := j.personagem - 8
+          if DXWaveListSnd.Count - 1 > 0: DXWaveListSnd.Play(1)
+        if isDown in s and j.antes(isDown) == 0 and j.personagem <= 8:
+          j.personagem := j.personagem + 8
+          if DXWaveListSnd.Count - 1 > 0: DXWaveListSnd.Play(1)
+        if isButton1 in s and j.antes(isButton1) == 0:
+          j.escolheu := 1
+          criaadversario(Byte(uint8(p)), j.personagem)
+          if DXWaveListSnd.Count > 2: DXWaveListSnd.Play(2)
+    for p in 1 .. 2:
+      if jogador[p].personagem < 1: jogador[p].personagem := 15
+      if jogador[p].personagem > 15: jogador[p].personagem := 1
+    if jogador[1].jogando == 0: jogador[1].escolheu := 1
+    if jogador[2].jogando == 0: jogador[2].escolheu := 1
+  if tempo == 0:
+    jogador[1].escolheu := 1
+    if jogador[1].jogando == 1: criaadversario(Byte(1), jogador[1].personagem)
+    jogador[2].escolheu := 1
+    if jogador[2].jogando == 1: criaadversario(Byte(2), jogador[2].personagem)
+    if DXWaveListSnd.Count > 2: DXWaveListSnd.Play(2)
+  if jogador[1].escolheu == 1 and jogador[2].escolheu == 1:
+    tela := 5
+    piscar := 0
+    contador := 0
+    jogador[1].at(Byte, 0x8c) := 0
+    jogador[2].at(Byte, 0x8c) := 0
+    at(Byte, 0x4b44db) := 1
+    if jogador[1].jogando == 1 and jogador[2].jogando == 1: tela := 6
+
 proc naoportada() =
   barra(0, 0, 400, 300, RGB(0, 0, 0))
   texto(200, 140, "tela " & $tela & " ainda nao portada", 'c', 10, RGB(255, 255, 255))
@@ -195,9 +306,9 @@ proc sobreposicao() =
     dec desafiante
     if desafiante == 0:
       tela := 4
-      at(Byte, 0x4b44d7) := 1
-      at(Byte, 0x4b44e3) := 20
-      at(Byte, 0x4b44e4) := 25
+      fase := 1
+      tempo := 20
+      quadros := 25
 
 ## a punch or kick pressed now adds 6 to its repeat count, which falls by
 ## one a frame out of a blow and stays up to 15
@@ -229,7 +340,8 @@ proc DXTimer1Timer*() =
   TimerInterval = velocidade
   if tela == 0: tela0()
   if tela == 1: tela1()
-  if tela > 1 and tela <= 12: naoportada()
+  if tela == 4: tela4()
+  if Integer(tela) in [2, 3, 5, 6, 7, 8, 9, 10, 11, 12]: naoportada()
   sobreposicao()
   if pausa == 1: TimerEnabled = false
   repeticoes()

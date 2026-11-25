@@ -254,6 +254,8 @@ static void run_game(void)
             keys[count++] = modern ? 0x70 : '5';
     }
     int next = chavo8_v1_frame(keys, count);
+    if (dx_terminated())
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
     if (next != interval) {
         interval = next;
         struct retro_system_av_info av;

@@ -72,6 +72,7 @@ bool wave_parse(const uint8_t *data, size_t size, wave_t *out);
 void config_open(const char *dir);
 const char *config_get(const char *key);
 void config_set(const char *key, const char *value);
+void config_clear(void);
 bool config_save(void);
 void config_close(void);
 

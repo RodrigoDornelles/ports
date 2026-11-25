@@ -24,6 +24,13 @@ int dx_play(const wave_t *wave, bool loop)
     return -1;
 }
 
+void dx_stop(const wave_t *wave)
+{
+    for (int i = 0; i < CHANNELS; i++)
+        if (channel[i].wave == wave)
+            channel[i].wave = NULL;
+}
+
 void dx_stop_all(void)
 {
     memset(channel, 0, sizeof channel);

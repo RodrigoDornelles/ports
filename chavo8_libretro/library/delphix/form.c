@@ -230,6 +230,28 @@ void dx_waves_play(int list, int index)
         dx_play(w, false);
 }
 
+void dx_waves_stop(int list, int index)
+{
+    const wave_t *w = dx_waves_get(list, index);
+    if (w)
+        dx_stop(w);
+}
+
+static bool terminated;
+
+/* Application.Terminate: the frontend is asked to close the core */
+void dx_terminate(void)
+{
+    terminated = true;
+}
+
+bool dx_terminated(void)
+{
+    bool t = terminated;
+    terminated = false;
+    return t;
+}
+
 void dx_input_set(int device, uint32_t states)
 {
     form.input[device] = states;

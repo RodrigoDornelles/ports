@@ -16,7 +16,7 @@ template at*(T: typedesc, address: int): untyped =
   cast[ptr T](addr chavesVar[address - Base])[]
 
 template zoom*: untyped = at(Integer, 0x4b4494)         ## the logo's half height while it grows
-template resolucao*: untyped = at(Byte, 0x4b449e)        ## 400x300, TELA CHEIA (1), (2)
+template opcao*: untyped = at(Byte, 0x4b449e)            ## the menus' cursor: resolution, settings, keys
 template piscar*: untyped = at(Byte, 0x4b44c0)           ## a counter of frames that blinks texts
 template mostravelocidade*: untyped = at(Byte, 0x4b44c1) ## frames left to show the speed bar
 template contador*: untyped = at(SmallInt, 0x4b44c4)     ## frames into the current screen
@@ -24,13 +24,17 @@ template camerax*: untyped = at(Integer, 0x4b44c8)
 template cameray*: untyped = at(Integer, 0x4b44cc)
 template velocidade*: untyped = at(Word, 0x4b44d0)       ## DXTimer1.Interval in ms, - and + in game
 template tela*: untyped = at(Byte, 0x4b44d6)             ## the screen DXTimer1Timer draws, 0 to 12
+template fase*: untyped = at(Byte, 0x4b44d7)          ## a screen's step, 1 while it slides in
 template cenario*: untyped = at(Byte, 0x4b44d8)          ## Cenarios/Cenario-n.bmp loaded
 template niveljogo*: untyped = at(Byte, 0x4b44d9)        ## Nível do Jogo, 1 to 8
 template creditos*: untyped = at(Byte, 0x4b44da)
 template rounds*: untyped = at(Byte, 0x4b44dc)           ## 1 to 3
 template sangue*: untyped = at(Byte, 0x4b44e1)
+template tempo*: untyped = at(Byte, 0x4b44e3)         ## seconds of the countdown on screen
+template quadros*: untyped = at(Byte, 0x4b44e4)       ## frames left of its second, 25
 template poder*: untyped = at(Byte, 0x4b44e2)            ## NORMAL, 1P MAX, 2P MAX, MAX
 template desafiante*: untyped = at(Byte, 0x4b57fa)       ## frames left of "someone entered the fight"
+template testesom*: untyped = at(Byte, 0x4b5809)         ## the Sons/Som-n.wav of the settings' test
 template musicaatual*: untyped = at(Byte, 0x4b580a)      ## the Musicas/Musica-n.wav loaded
 template tempodemo*: untyped = at(SmallInt, 0x4b580c)    ## frames left of the demonstration fight
 template niveldano*: untyped = at(Double, 0x4b5888)      ## Nível de Dano, 0.3 to 2
@@ -40,6 +44,7 @@ template linguagem*: untyped = at(Byte, 0x4b58a1)        ## 1 Português, 2 Espa
 template quantsons*: untyped = at(Byte, 0x4b58a2)
 template quantmusicas*: untyped = at(Byte, 0x4b58a3)
 template depuracao*: untyped = at(Byte, 0x4b58a4)        ## the author's debug HUD, never on in the release
+template golpes*: untyped = at(Byte, 0x4b58a6)           ## the pause shows the moves (G)
 template pausa*: untyped = at(Byte, 0x4b58a7)
 template flash*: untyped = at(Byte, 0x4b58a8)
 template mostrarnivel*: untyped = at(Byte, 0x4b58a9)
@@ -68,7 +73,10 @@ template y*(l: Lutador): untyped = l.at(Double, 0x08)
 template personagem*(l: Lutador): untyped = l.at(Byte, 0x10)
 template altura*(l: Lutador): untyped = l.at(SmallInt, 0x7a)
 template repetesoco*(l: Lutador): untyped = l.at(Byte, 0x9c)
-template jogando*(l: Lutador): untyped = l.at(Byte, 0x9e)       ## a person plays it (1 and 2 are refused then)
+template jogando*(l: Lutador): untyped = l.at(Byte, 0x9e)      ## a person plays it (1 and 2 are refused then)
+template escolheu*(l: Lutador): untyped = l.at(Byte, 0x9f)
+template adversario*(l: Lutador, k: untyped): untyped = l.at(Byte, 0xa0 + k)  ## 0 to 6, the ladder
+template chefe*(l: Lutador): untyped = l.at(Byte, 0xa7)          ## the last opponent
 template repetechute*(l: Lutador): untyped = l.at(Byte, 0x9d)
 
 ## the device's states of the frame before: isButton1..4 at A8h, isUp,

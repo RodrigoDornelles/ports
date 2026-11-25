@@ -63,6 +63,9 @@ uint32_t form_image_pixel(int image, int x, int y);
 void dx_images_draw(int list, int index, int x, int y);
 void dx_images_draw_alpha(int list, int index, int l, int t, int r, int b, int alpha);
 void dx_waves_play(int list, int index);
+void dx_waves_stop(int list, int index);
+void dx_terminate(void);
+bool dx_terminated(void);
 void dx_input_set(int device, uint32_t states);
 void dx_input_update(void);
 uint32_t dx_input_states(int device);
@@ -83,5 +86,6 @@ const wave_t *dx_waves_get(int list, int index);
 /* TDXSound: the waves mixed into 44100 Hz stereo */
 #define DX_RATE 44100
 int dx_play(const wave_t *wave, bool loop);
+void dx_stop(const wave_t *wave);
 void dx_stop_all(void);
 void dx_mix(int16_t *out, size_t frames);

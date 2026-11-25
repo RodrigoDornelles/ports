@@ -67,6 +67,15 @@ void config_set(const char *key, const char *value)
     }
 }
 
+void config_clear(void)
+{
+    for (int i = 0; i < config.count; i++) {
+        free(config.key[i]);
+        free(config.value[i]);
+    }
+    config.count = 0;
+}
+
 bool config_save(void)
 {
     if (!config.path)
@@ -82,10 +91,7 @@ bool config_save(void)
 
 void config_close(void)
 {
-    for (int i = 0; i < config.count; i++) {
-        free(config.key[i]);
-        free(config.value[i]);
-    }
+    config_clear();
     free(config.path);
-    memset(&config, 0, sizeof config);
+    config.path = NULL;
 }

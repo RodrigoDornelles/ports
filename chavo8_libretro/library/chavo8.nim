@@ -28,7 +28,9 @@ proc chavo8_v1_frame(keys: ptr UncheckedArray[uint16], count: cint): cint {.expo
 ## screens where 1 or 2 enter (FormKeyDown) and for a player not in the game,
 ## the coin only when there is no credit
 proc chavo8_v1_start(p: cint, keys: ptr UncheckedArray[uint16]): cint {.exportc, cdecl.} =
-  if jogador[p].jogando != 0 or not (tela == 1 or tela == 4 or tela == 7 or tela == 8): return 0
+  let aberta = tela == 1 or (tela == 4 and at(Byte, 0x4b44e0) == 0) or
+    (tela == 7 and at(Byte, 0x4b44e0) == 0) or (tela == 9 and tempo > 0 and quadros > 0)
+  if jogador[p].jogando != 0 or not aberta: return 0
   if creditos == 0:
     keys[result] = uint16('5')
     inc result

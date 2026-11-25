@@ -188,6 +188,42 @@ proc DrawAlpha*(list: TDXImageList, index: Integer, r: TRect, alpha: Integer) =
 proc Play*(list: TDXWaveList, index: Integer) =
   dx_waves_play(cint(ord(list)), index)
 
+proc dx_waves_stop(list, index: cint) {.importc, cdecl.}
+proc Stop*(list: TDXWaveList, index: Integer) =
+  dx_waves_stop(cint(ord(list)), index)
+
+proc dx_terminate() {.importc, cdecl.}
+proc Terminate*() = dx_terminate()
+
+proc config_set(key, value: cstring) {.importc, cdecl.}
+proc config_clear() {.importc, cdecl.}
+proc config_save(): bool {.importc, cdecl.}
+
+## the lines a TStrings held, saved as chavo8.ini, a key per line in order:
+## keys past the lines are dropped, as the file ended there
+proc SaveConfigLines*(keys: openArray[string], lines: openArray[string]) =
+  config_clear()
+  for i in 0 ..< min(keys.len, lines.len):
+    config_set(cstring(keys[i]), cstring(lines[i]))
+  discard config_save()
+
+const
+  VK_ESCAPE* = 0x1b
+  VK_LWIN* = 0x5b
+  VK_F1* = 0x70
+  VK_F2* = 0x71
+  VK_OEM_PLUS* = 0xbb
+  VK_OEM_COMMA* = 0xbc
+  VK_OEM_MINUS* = 0xbd
+  VK_OEM_PERIOD* = 0xbe
+
+## Keyboard.KeyAssigns: up to three virtual keys a state, as the DFM set them
+var KeyAssigns*: array[TDXInputState, array[3, Integer]] = [
+  [0x26'i32, 0, 0], [0x28'i32, 0, 0], [0x25'i32, 0, 0], [0x27'i32, 0, 0],
+  [ord('Z').int32, 0, 0], [ord('X').int32, 0, 0], [ord('C').int32, 0, 0], [ord('V').int32, 0, 0],
+  [0'i32, 0, 0], [0'i32, 0, 0], [0'i32, 0, 0], [0'i32, 0, 0],
+  [0'i32, 0, 0], [0'i32, 0, 0], [0'i32, 0, 0], [0'i32, 0, 0]]
+
 ## DXTimer1: the frontend runs OnTimer while enabled, at Interval ms
 var TimerEnabled* = true
 var TimerInterval*: Integer = 1

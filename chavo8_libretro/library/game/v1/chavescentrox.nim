@@ -288,10 +288,10 @@ proc FormCreate*() =
   at(Word, 0x4b44c4) := 0
   at(Integer, 0x4b44c8) := 0
   at(Integer, 0x4b44cc) := 0
-  at(Byte, 0x4b44d7) := 1
+  fase := 1
   at(Byte, 0x4b449e) := 1
-  at(Byte, 0x4b44e3) := 30
-  at(Byte, 0x4b44e4) := 25
+  tempo := 30
+  quadros := 25
   at(Word, 0x4b57f6) := 0
   depuracao := 0
   at(Byte, 0x4b58a5) := 0
@@ -344,10 +344,10 @@ proc FormCreate*() =
   at(Byte, 0x4b44da) := 0
   jogador[1].personagem := 1
   jogador[2].personagem := 2
-  jogador[1].at(Byte, 0x9f) := 0
-  jogador[2].at(Byte, 0x9f) := 0
-  jogador[1].at(Byte, 0x9e) := 0
-  jogador[2].at(Byte, 0x9e) := 0
+  jogador[1].escolheu := 0
+  jogador[2].escolheu := 0
+  jogador[1].jogando := 0
+  jogador[2].jogando := 0
   zerardados(Byte(1))
   zerardados(Byte(2))
   criarecorde(Byte(1), "CHV", Byte(1), 10000)
@@ -406,3 +406,28 @@ proc FormCreate*() =
   for k in 1 .. 150:
     DXImageListLutador.Add
     DXImageListLutadorInvert.Add
+
+## the one player ladder: seven opponents drawn among those left, never the
+## fighter itself, its last opponent nor the ones each fighter is spared,
+## then that last one
+proc criaadversario*(p: Byte, personagem: Byte) =
+  const
+    chefes = [2, 5, 9, 1, 2, 7, 2, 5, 3, 1, 3, 1, 5, 5, 3]
+    poupados = [@[3, 9], @[3, 8, 9, 14, 15], @[1, 2, 14], @[5, 6], @[4, 6], @[4, 5, 15],
+      @[10, 8], @[2, 7], @[1, 2, 15], @[7, 9], @[1, 9], @[5, 8], @[1, 8, 14], @[2, 3, 13], @[1, 2, 9]]
+  let j = jogador[p]
+  for k in 0 .. 7: j.adversario(k) := 1
+  for c in 1 .. 15:
+    if personagem == c: j.chefe := chefes[c - 1]
+  var livre: array[1 .. 15, bool]
+  for c in 1 .. 15: livre[c] = true
+  livre[Integer(j.chefe)] = false
+  for c in 1 .. 15:
+    if personagem == c:
+      for n in poupados[c - 1]: livre[n] = false
+  for k in 0 .. 6:
+    var n = Random(15) + 1
+    while not livre[n] or personagem == n:
+      n = Random(15) + 1
+    j.adversario(k) := n
+    livre[n] = false

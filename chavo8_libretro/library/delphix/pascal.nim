@@ -52,10 +52,23 @@ proc `:=`*(dst: var Real, v: Real) = dst = v
 
 proc `$`*(x: Byte | Word | ShortInt | SmallInt): string = $Integer(x)
 
+## arithmetic with a Byte, Word, ShortInt or SmallInt is done in Integer
+template pascalOp(op: untyped) =
+  proc op*[A: Small, B: Small | int | int32](a: A, b: B): Integer = op(Integer(a), Integer(b))
+  proc op*[A: int | int32, B: Small](a: A, b: B): Integer = op(Integer(a), Integer(b))
+
+pascalOp(`+`)
+pascalOp(`-`)
+pascalOp(`*`)
+pascalOp(`div`)
+pascalOp(`mod`)
+
 ## / is always a real division in Pascal
 proc `/`*[A, B: SomeInteger | Small](a: A, b: B): Real = Real(int64(a)) / Real(int64(b))
 proc `/`*[A: SomeInteger | Small](a: A, b: Real): Real = Real(int64(a)) / b
 proc `/`*[B: SomeInteger | Small](a: Real, b: B): Real = a / Real(int64(b))
+proc `*`*[A: SomeInteger | Small](a: A, b: Real): Real = Real(int64(a)) * b
+proc `*`*[B: SomeInteger | Small](a: Real, b: B): Real = a * Real(int64(b))
 
 var RandSeed*: LongInt
 
@@ -140,6 +153,16 @@ proc StrToFloat*(s: string): Extended =
   if t.len == 0 or e != cast[cstring](cast[uint](cstring(t)) + uint(t.len)):
     raise newException(EConvertError, "'" & s & "' is not a valid floating point value")
 
+proc c_snprintf(s: cstring, n: csize_t, f: cstring): cint {.importc: "snprintf", header: "<stdio.h>", varargs.}
+
+## FloatToStr: 15 significant digits, the separator of the game's Windows
+proc FloatToStr*(x: Extended): string =
+  var buf: array[64, char]
+  discard c_snprintf(cast[cstring](addr buf), csize_t(buf.len), "%.15g", x)
+  result = $cast[cstring](addr buf)
+  for c in result.mitems:
+    if c == '.': c = ','
+
 proc IntToStr*(n: Int64): string = $n
 proc IntToStr*(n: Integer): string = $n
 
@@ -171,10 +194,13 @@ when isMainModule:
   doAssert Trunc(-2.7) == -2 and Trunc(2.7) == 2
   doAssert Int(-2.7) == -2.0 and Int(2.7) == 2.0
   doAssert SmallInt(7) / 2 == 3.5 and Byte(1) / 4 == 0.25
+  doAssert Byte(200) * 8 == 1600 and 3 - Byte(5) == -2 and Byte(7) div 2 == 3
+  doAssert Byte(10) * 1.35 == 13.5
   doAssert Cos(0.0) == 1.0 and Cos(1e19) == 0.0
   doAssert StrToInt(" 42") == 42 and StrToInt("-7") == -7 and StrToInt("$1F") == 31 and StrToInt("0x10") == 16
   doAssert StrToInt("-2147483648") == low(Integer)
   for bad in ["", "4 ", "x", "2147483648", "1.5"]:
     doAssertRaises(EConvertError): discard StrToInt(bad)
   doAssert StrToFloat("0,9") == 0.9 and StrToFloat(" 1.5 ") == 1.5
+  doAssert FloatToStr(0.9) == "0,9" and FloatToStr(2.0) == "2" and StrToFloat(FloatToStr(1.35)) == 1.35
   doAssertRaises(EConvertError): discard StrToFloat("0,9x")
