@@ -2,11 +2,11 @@
 
 > Street Chaves, the 2004 Delphi fighting game by Cybergamba, brought back as a libretro core: its logic redone as the original wrote it, on the files of the game you already have.
 
-Load `Chaves.exe` from the game's folder, or a `.zip` holding that folder. The core reads the pictures and waves of the folders and of the exe itself; nothing of the game is in this repository.
+Load `Chaves.exe` from the game's folder, or a `.zip` or `.rar` (RAR 1.5 to 5, through [dmc_unrar](https://github.com/DrMcCoy/dmc_unrar), GPL-2.0-or-later) holding that folder. The core reads the pictures and waves of the folders and of the exe itself; nothing of the game is in this repository.
 
 ## Layout
 
-- `library/platform/core/`: libretro, the game's files (folder or zip, names without case), the exe's resources and form, BMP and WAV, and the game's texts read from the code that filled its memos (`texts.c`).
+- `library/platform/core/`: libretro, the game's files (folder, zip or rar, names without case), the exe's resources and form, BMP and WAV, and the game's texts read from the code that filled its memos (`texts.c`).
 - `library/platform/delphix/`: what the game got from DelphiX and Windows: 16-bit surfaces, GDI canvas and text, DirectSound mixing.
 - `library/platform/emu/`: what runs Delphi's code: `pascal.nim` gives its integer and RTL semantics to the Nim ports, `x86.c` and `vcl.c` its RTL, VCL and DelphiX to the lifted x86 (`include/chavo8/x86.h`).
 - `library/game/v1/`: the original releases, ported from their Delphi units in Nim; `library/chavo8.nim` builds every game into one static library linked into the core.

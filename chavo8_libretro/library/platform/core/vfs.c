@@ -6,19 +6,23 @@
 #include <sys/stat.h>
 
 #include "stb_image.h"
+#define DMC_UNRAR_HEADER_FILE_ONLY
+#include "dmc_unrar.c"
 
 #include "chavo8/platform.h"
 
 typedef struct {
     char *name;
     char *key;
-    uint32_t offset, csize, usize;
+    uint64_t offset;
+    uint32_t csize, usize;
     uint16_t method;
 } entry_t;
 
 static struct {
     char *root;
     FILE *zip;
+    dmc_unrar_archive *rar;
     char *exe;
     entry_t *e;
     size_t n, cap;
@@ -32,7 +36,7 @@ static char *key_of(const char *name)
     return k;
 }
 
-static void add(const char *name, uint32_t offset, uint32_t csize, uint32_t usize, uint16_t method)
+static void add(const char *name, uint64_t offset, uint32_t csize, uint32_t usize, uint16_t method)
 {
     if (vfs.n == vfs.cap) {
         vfs.cap = vfs.cap ? vfs.cap * 2 : 512;
@@ -86,8 +90,41 @@ static bool ends_with(const char *s, const char *end)
     return n >= m && !strcmp(s + n - m, end);
 }
 
-/* the central directory, then only what sits beside the exe, Chaves.exe
- * first or else any exe, relative to its folder */
+/* of an archive's entries, only what sits beside the exe, Chaves.exe first
+ * or else any exe, relative to its folder */
+static bool rebase(void)
+{
+    entry_t *all = vfs.e;
+    size_t all_n = vfs.n;
+    const entry_t *exe = NULL;
+    for (size_t i = 0; i < all_n; i++) {
+        const char *base = strrchr(all[i].key, '/');
+        base = base ? base + 1 : all[i].key;
+        if (!strcmp(base, "chaves.exe") || (!exe && ends_with(base, ".exe")))
+            exe = &all[i];
+    }
+    if (!exe)
+        return false;
+    const char *slash = strrchr(exe->key, '/');
+    size_t prefix = slash ? (size_t)(slash - exe->key) + 1 : 0;
+    char *dir = strndup(exe->key, prefix);
+    vfs.e = NULL;
+    vfs.n = vfs.cap = 0;
+    for (size_t i = 0; i < all_n; i++) {
+        if (!strncmp(all[i].key, dir, prefix) && all[i].key[prefix]) {
+            add(all[i].name + prefix, all[i].offset, all[i].csize, all[i].usize, all[i].method);
+            if (&all[i] == exe)
+                vfs.exe = strdup(all[i].name + prefix);
+        }
+        free(all[i].name);
+        free(all[i].key);
+    }
+    free(all);
+    free(dir);
+    return true;
+}
+
+/* the central directory: where each entry is, packed or deflated */
 static bool zip_index(void)
 {
     uint8_t tail[65557];
@@ -119,34 +156,25 @@ static bool zip_index(void)
         p += 46 + nlen + xlen + clen;
     }
     free(cd);
-    entry_t *all = vfs.e;
-    size_t all_n = vfs.n;
-    const entry_t *exe = NULL;
-    for (size_t i = 0; i < all_n; i++) {
-        const char *base = strrchr(all[i].key, '/');
-        base = base ? base + 1 : all[i].key;
-        if (!strcmp(base, "chaves.exe") || (!exe && ends_with(base, ".exe")))
-            exe = &all[i];
-    }
-    if (!exe)
+    return rebase();
+}
+
+/* the entries' headers; an entry's offset is its index in the archive */
+static bool rar_index(const char *content)
+{
+    vfs.rar = calloc(1, sizeof *vfs.rar);
+    if (dmc_unrar_archive_init(vfs.rar) || dmc_unrar_archive_open_path(vfs.rar, content)) {
+        free(vfs.rar);
+        vfs.rar = NULL;
         return false;
-    const char *slash = strrchr(exe->key, '/');
-    size_t prefix = slash ? (size_t)(slash - exe->key) + 1 : 0;
-    char *dir = strndup(exe->key, prefix);
-    vfs.e = NULL;
-    vfs.n = vfs.cap = 0;
-    for (size_t i = 0; i < all_n; i++) {
-        if (!strncmp(all[i].key, dir, prefix) && all[i].key[prefix]) {
-            add(all[i].name + prefix, all[i].offset, all[i].csize, all[i].usize, all[i].method);
-            if (&all[i] == exe)
-                vfs.exe = strdup(all[i].name + prefix);
-        }
-        free(all[i].name);
-        free(all[i].key);
     }
-    free(all);
-    free(dir);
-    return true;
+    for (dmc_unrar_size_t i = 0, n = dmc_unrar_get_file_count(vfs.rar); i < n; i++) {
+        char name[1024];
+        const dmc_unrar_file *f = dmc_unrar_get_file_stat(vfs.rar, i);
+        if (f && !dmc_unrar_file_is_directory(vfs.rar, i) && dmc_unrar_get_filename(vfs.rar, i, name, sizeof name))
+            add(name, i, 0, (uint32_t)f->uncompressed_size, 0);
+    }
+    return rebase();
 }
 
 static int by_key(const void *a, const void *b)
@@ -158,11 +186,16 @@ bool vfs_open(const char *content)
 {
     vfs_close();
     char *key = key_of(content);
-    bool zip = ends_with(key, ".zip");
+    bool zip = ends_with(key, ".zip"), rar = ends_with(key, ".rar");
     free(key);
     if (zip) {
         vfs.zip = fopen(content, "rb");
         if (!vfs.zip || !zip_index()) {
+            vfs_close();
+            return false;
+        }
+    } else if (rar) {
+        if (!rar_index(content)) {
             vfs_close();
             return false;
         }
@@ -192,6 +225,10 @@ void vfs_close(void)
     free(vfs.exe);
     if (vfs.zip)
         fclose(vfs.zip);
+    if (vfs.rar) {
+        dmc_unrar_archive_close(vfs.rar);
+        free(vfs.rar);
+    }
     memset(&vfs, 0, sizeof vfs);
 }
 
@@ -224,7 +261,7 @@ uint8_t *vfs_load(const char *name, size_t *size)
     bool ok = false;
     if (vfs.zip) {
         uint8_t local[30];
-        fseek(vfs.zip, e->offset, SEEK_SET);
+        fseek(vfs.zip, (long)e->offset, SEEK_SET);
         if (fread(local, 1, 30, vfs.zip) == 30 && u32(local) == 0x04034b50) {
             fseek(vfs.zip, u16(local + 26) + u16(local + 28), SEEK_CUR);
             if (e->method == 0) {
@@ -236,6 +273,8 @@ uint8_t *vfs_load(const char *name, size_t *size)
                 free(packed);
             }
         }
+    } else if (vfs.rar) {
+        ok = dmc_unrar_extract_file_to_mem(vfs.rar, e->offset, data, e->usize, NULL, false) == DMC_UNRAR_OK;
     } else {
         char path[4096];
         snprintf(path, sizeof path, "%s/%s", vfs.root, e->name);

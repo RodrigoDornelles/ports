@@ -13,6 +13,12 @@ set(COMICRELIEF_VERSION "993d03b988291b8609cd3fc24e10b6a982c79de9")
 set(COMICRELIEF_DOWNLOAD "https://raw.githubusercontent.com/google/fonts/${COMICRELIEF_VERSION}/ofl/comicrelief")
 set(COMICRELIEF_DIR "${CMAKE_SOURCE_DIR}/vendor/comicrelief")
 
+# dmc_unrar (GPL-2.0-or-later, see its COPYING): the game as the .rar it was
+# shared in, RAR 1.5 to 5, one C file
+set(CHAVO8_UNRAR_VERSION "ab8bbddfb84f4b5853c8184be84a8c2565f4a4bb")
+set(CHAVO8_UNRAR_DOWNLOAD "https://raw.githubusercontent.com/DrMcCoy/dmc_unrar/${CHAVO8_UNRAR_VERSION}")
+set(CHAVO8_UNRAR_DIR "${CMAKE_SOURCE_DIR}/vendor/dmc_unrar")
+
 function(chavo8_download url file)
     if (NOT EXISTS "${file}")
         file(DOWNLOAD "${url}" "${file}" STATUS status)
@@ -28,6 +34,9 @@ foreach(file stb_image.h stb_truetype.h)
     chavo8_download("${CHAVO8_STB_DOWNLOAD}/${file}" "${CHAVO8_STB_DIR}/${file}")
 endforeach()
 chavo8_download("${CHAVO8_LIBRETRO_DOWNLOAD}" "${CHAVO8_LIBRETRO_DIR}/libretro.h")
+foreach(file dmc_unrar.c COPYING)
+    chavo8_download("${CHAVO8_UNRAR_DOWNLOAD}/${file}" "${CHAVO8_UNRAR_DIR}/${file}")
+endforeach()
 foreach(file ComicRelief-Regular.ttf OFL.txt)
     chavo8_download("${COMICRELIEF_DOWNLOAD}/${file}" "${COMICRELIEF_DIR}/${file}")
 endforeach()
@@ -82,6 +91,12 @@ dopo_nim_library(chavo8_game "${CHAVO8_DIR}/library/chavo8.nim"
     "--path:${CHAVO8_LIFTED}")
 target_include_directories(chavo8_game PRIVATE "${CHAVO8_DIR}/include")
 
+add_library(chavo8_unrar STATIC "${CHAVO8_UNRAR_DIR}/dmc_unrar.c")
+target_include_directories(chavo8_unrar PUBLIC "${CHAVO8_UNRAR_DIR}")
+target_compile_definitions(chavo8_unrar PRIVATE _FILE_OFFSET_BITS=64)
+target_compile_options(chavo8_unrar PRIVATE -w)
+set_target_properties(chavo8_unrar PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 file(GLOB_RECURSE chavo8_files CONFIGURE_DEPENDS "${CHAVO8_DIR}/library/*.c")
 file(GLOB chavo8_lifted "${CHAVO8_LIFTED}/x86v1*.c")
 list(APPEND chavo8_files ${chavo8_lifted})
@@ -90,12 +105,13 @@ if (EMSCRIPTEN)
     add_library(chavo8_libretro STATIC "${chavo8_files}")
 else()
     add_library(chavo8_libretro SHARED "${chavo8_files}")
+    target_link_options(chavo8_libretro PRIVATE -Wl,--no-undefined)
 endif()
 target_include_directories(chavo8_libretro PRIVATE "${CHAVO8_DIR}/include" "${CHAVO8_INCLUDE_GENERATED}")
 target_include_directories(chavo8_libretro SYSTEM PRIVATE "${CHAVO8_LIBRETRO_DIR}" "${CHAVO8_STB_DIR}")
 target_compile_definitions(chavo8_libretro PRIVATE _DEFAULT_SOURCE)
 target_compile_options(chavo8_libretro PRIVATE -Wall -Wextra -fwrapv)
-target_link_libraries(chavo8_libretro PRIVATE chavo8_game m)
+target_link_libraries(chavo8_libretro PRIVATE chavo8_game chavo8_unrar m)
 set_target_properties(chavo8_libretro PROPERTIES
     C_EXTENSIONS OFF
     PREFIX ""

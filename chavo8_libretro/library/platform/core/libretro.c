@@ -115,7 +115,7 @@ void retro_get_system_info(struct retro_system_info *info)
     memset(info, 0, sizeof *info);
     info->library_name = "Chavo8";
     info->library_version = "0.1";
-    info->valid_extensions = "exe|zip";
+    info->valid_extensions = "exe|zip|rar";
     info->need_fullpath = true;
     info->block_extract = true;
 }
