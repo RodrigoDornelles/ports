@@ -10,7 +10,7 @@ Load `Chaves.exe` from the game's folder, or a `.zip` or `.rar` (RAR 1.5 to 5, t
 - `library/platform/delphix/`: what the game got from DelphiX and Windows: 16-bit surfaces, GDI canvas and text, DirectSound mixing.
 - `library/platform/emu/`: what runs Delphi's code: `pascal.nim` gives its integer and RTL semantics to the Nim ports, `x86.c` and `vcl.c` its RTL, VCL and DelphiX to the lifted x86 (`include/chavo8/x86.h`).
 - `library/game/v1/`: the original releases, ported from their Delphi units in Nim; `library/chavo8.nim` builds every game into one static library linked into the core.
-- `library/game/scenario/`: the screens of DXTimer1Timer ported one a file (`tela8.nim`: the records, `tela9.nim`: continue and game over, `tela11.nim`: the thanks, `tela12.nim`: a new record's name).
+- `library/game/scenario/`: the screens of DXTimer1Timer ported one a file (`tela8.nim`: the records, `tela9.nim`: continue and game over, `tela10.nim`: the fifteen endings, each a script in a small DSL over the frame, `tela11.nim`: the thanks, `tela12.nim`: a new record's name).
 
 The fight (tela 7 of DXTimer1Timer, the methods it calls and ChavesGolpes' tables of moves, thousands of plain ifs) is not ported by hand: `library/game/assembly.tar.xz` holds its x86 as `scripts/dump.nim` took it from the exe, one `.s` a function, and the build unpacks it and turns it into C with `scripts/lift.nim` (`x86v1_<function>.c`), over the machine of `include/chavo8/x86.h` whose memory is ChavesVar's bytes. Its calls out go to Delphi's RTL (`library/platform/emu/x86.c`), to the VCL and DelphiX over a form laid out as objects (`library/platform/emu/vcl.c`), or back to the methods ported in Nim (`library/game/v1/lifted.nim`). To dump again:
 

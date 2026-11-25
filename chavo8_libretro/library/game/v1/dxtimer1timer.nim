@@ -5,7 +5,7 @@
 
 import ../../platform/emu/pascal, ../../platform/delphix/delphix
 import chavesvar, chavestexto, chavescentrox, lifted
-import ../scenario/[tela8, tela9, tela11, tela12]
+import ../scenario/[tela8, tela9, tela10, tela11, tela12]
 
 const
   branco = TColor(0xFFFFFF)
@@ -488,7 +488,8 @@ proc DXTimer1Timer*() =
   if tela == 7: lifted.tela7()
   if tela == 8: tela8()
   if tela == 9: tela9()
-  if Integer(tela) in [2, 3, 10]: naoportada()
+  if Integer(tela) in [2, 3]: naoportada()
+  if tela == 10: tela10()
   if tela == 11: tela11()
   if tela == 12: tela12()
   sobreposicao()
