@@ -207,7 +207,8 @@ select {
 /* a bar with nothing but its button */
 .bar.solo { justify-content: center; }
 /* fields of one width, the room left between them and the button */
-.bar.even > .field { flex: 0 1 220px; }
+.bar.even > .field { flex: 0 1 150px; }
+.bar.even > .field.grow { flex-grow: 1; }
 .bar.even > .go { flex-grow: 0; }
 .bar.solo .go { flex-grow: 0; margin-left: 0; }
 /* a second button after the first: outlined, beside it */

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{> head}}
+</head>
+<body>
+  <main>
+{{> header}}
+    <p class="lead">Street Chaves, the 2004 fan-made fighting game of the vila, in the browser: the original 1.5A, run as it was written.</p>
+
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-play" aria-controls="launch" aria-selected="true">Play</button>
+      <button type="button" role="tab" id="tab-download" aria-controls="pack" aria-selected="false">Download</button>
+    </div>
+
+    <form id="launch" role="tabpanel" aria-labelledby="tab-play">
+      <div class="bar even">
+        <label class="field grow">
+          <span>Player name</span>
+          <input id="nick" name="nick" type="text" maxlength="15" autocomplete="nickname" spellcheck="false" placeholder="Player">
+        </label>
+        <label class="field">
+          <span>Difficulty</span>
+          <select name="streetchaves-nivel">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Controls</span>
+          <select name="streetchaves-control">
+            <option value="modern">Modern</option>
+            <option value="arcade">Arcade</option>
+            <option value="single">Single button</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Resolution</span>
+          <select name="streetchaves-resolution">
+            <option value="400x300">400x300</option>
+          </select>
+        </label>
+        <button type="submit" class="go">Play</button>
+      </div>
+      <details class="graphics">
+        <summary>More</summary>
+        <div class="options">
+          <label class="field">
+            <span>Language</span>
+            <select name="streetchaves-language">
+              <option value="auto">Game's setting</option>
+              <option value="portugues">Português</option>
+              <option value="espanol">Español</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Debug</span>
+            <select name="streetchaves-debug">
+              <option value="0">Off</option>
+              <option value="1">The author's</option>
+              <option value="2">The core's</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Asset viewer</span>
+            <select name="streetchaves-viewer">
+              <option value="disabled">Off</option>
+              <option value="enabled">On</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <fieldset class="games">
+        <legend class="sr-only">Game</legend>
+        <label class="game">
+          <input type="radio" name="game" value="cybergamba" checked>
+          <img class="banner" src="banner.png" alt="">
+          <strong>Street Chaves 1.5A</strong>
+        </label>
+      </fieldset>
+    </form>
+
+    <form id="pack" role="tabpanel" aria-labelledby="tab-download" hidden>
+      <div class="bar">
+        <label class="field grow">
+          <span>What</span>
+          <select id="system" name="system">
+            <option value="game">The game, Street Chaves 1.5A (.rar)</option>
+            <optgroup label="The RetroArch core">
+              <option value="x86_64">x86_64 (.zip)</option>
+              <option value="armhf">ARM (.zip)</option>
+              <option value="aarch64">ARM64 (.zip)</option>
+            </optgroup>
+          </select>
+        </label>
+        <button type="submit" class="go">Download</button>
+      </div>
+      <p class="status" id="pack-status" role="status"></p>
+    </form>
+  </main>
+
+  <script type="module">
+    import { watchLobby } from '../retroarch/player.js';
+
+    const CONTENT = '{{content}}';
+    const form = document.getElementById('launch');
+    const KEY = 'streetchaves.launch';
+    const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; } };
+    const store = () => { try { localStorage.setItem(KEY, JSON.stringify(Object.fromEntries(new FormData(form)))); } catch {} };
+
+    /* the tabs: Play, and Download, which #download opens */
+    const tabs = { play: document.getElementById('tab-play'), download: document.getElementById('tab-download') };
+    function showTab(name) {
+      for (const [key, tab] of Object.entries(tabs)) {
+        tab.setAttribute('aria-selected', String(key === name));
+        document.getElementById(tab.getAttribute('aria-controls')).hidden = key !== name;
+      }
+    }
+    for (const [key, tab] of Object.entries(tabs))
+      tab.addEventListener('click', () => { showTab(key); history.replaceState(null, '', key === 'play' ? '#' : `#${key}`); });
+    if (location.hash.slice(1) in tabs) showTab(location.hash.slice(1));
+
+    for (const [key, value] of Object.entries(load())) {
+      const field = form.elements.namedItem(key);
+      const radios = field instanceof RadioNodeList ? [...field]
+        : field?.type === 'radio' ? [field] : null;
+      if (radios) {
+        const radio = radios.find((r) => r.value === value);
+        if (radio) radio.checked = true;
+      } else if (field instanceof HTMLInputElement) field.value = value;
+      else if (field instanceof HTMLSelectElement && [...field.options].some((o) => o.value === value)) field.value = value;
+    }
+    form.addEventListener('change', store);
+    form.elements.nick.addEventListener('input', store);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      store();
+      const data = new FormData(form);
+      const game = data.get('game');
+      data.delete('game');
+      /* only what differs from the core's defaults, the fields' own */
+      const params = new URLSearchParams();
+      for (const [key, value] of data) {
+        const field = form.elements.namedItem(key);
+        const fallback = field instanceof HTMLSelectElement
+          ? ([...field.options].find((o) => o.defaultSelected) ?? field.options[0]).value : '';
+        const text = String(value).trim();
+        if (text && text !== fallback) params.set(key, text);
+      }
+      location.href = `${game}.html` + (params.size ? `#${params}` : '');
+    });
+
+    /* the download: the game as hosted; the cores are not published yet */
+    document.getElementById('pack').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const what = document.getElementById('system').value;
+      const say = document.getElementById('pack-status');
+      if (what === 'game') {
+        say.classList.remove('error');
+        say.textContent = '';
+        location.href = CONTENT;
+        return;
+      }
+      say.textContent = 'The core downloads are not available yet.';
+      say.classList.add('error');
+    });
+
+    /* who is playing: the rooms the core's hosts announce */
+    const online = document.getElementById('online');
+    const onlineText = document.getElementById('online-text');
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    watchLobby('Street Chaves', (rooms) => {
+      const players = rooms.reduce((sum, room) => sum + room.players, 0);
+      online.classList.toggle('live', players > 0);
+      onlineText.textContent = players
+        ? `${plural(players, 'player', 'players')} online in ${plural(rooms.length, 'room', 'rooms')}`
+        : 'No rooms open right now';
+    }).catch((e) => {
+      console.warn('[streetchaves] lobby:', e);
+      online.hidden = true;
+    });
+  </script>
+</body>
+</html>

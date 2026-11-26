@@ -23,7 +23,7 @@ set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 option(PORTS_USE_SDL_LIBRETRO "build sdl_libretro core (libretro backend + sdl2/jack frontends)" ON)
 option(PORTS_USE_PRBOOMTV_LIBRETRO "build prboomtv_libretro core (prboom patched for tv)" ON)
-option(PORTS_USE_CHAVO8_LIBRETRO "build chavo8_libretro core (Street Chaves)" ON)
+option(PORTS_USE_STREETCHAVES_LIBRETRO "build streetchaves_libretro core (Street Chaves)" ON)
 option(PORTS_USE_RETROARCH "build RetroArch's web player with the cores (wasm only)" ${PORTS_WASM})
 option(DOPO_USE_BALATRO_WEB_PATCH "build the Balatro patcher page" OFF)
 
@@ -38,14 +38,14 @@ if (EMSCRIPTEN)
     if (DOPO_USE_BALATRO_WEB_PATCH)
         set(dopo_home_balatro "balatro=1")
     endif()
-    set(dopo_home_chavo8 "")
-    if (PORTS_USE_CHAVO8_LIBRETRO)
-        set(dopo_home_chavo8 "chavo8=1")
+    set(dopo_home_streetchaves "")
+    if (PORTS_USE_STREETCHAVES_LIBRETRO)
+        set(dopo_home_streetchaves "streetchaves=1")
     endif()
     dopo_www_page("${PORTS_DIST}/index.html" "${DOPO_DIR}/www/index.html"
         "title=Dornelles Ports"
         "description=Classic games ported to the browser and to TV boxes, alone or with friends."
-        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro} ${dopo_home_chavo8}
+        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro} ${dopo_home_streetchaves}
         "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/android-chrome-512x512.png"
         "card=summary")
     add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")
@@ -63,8 +63,8 @@ if (PORTS_USE_PRBOOMTV_LIBRETRO)
     include(prboomtv_libretro/cmake/prboomtv.cmake)
 endif()
 
-if (PORTS_USE_CHAVO8_LIBRETRO)
-    include(chavo8_libretro/cmake/chavo8.cmake)
+if (PORTS_USE_STREETCHAVES_LIBRETRO)
+    include(streetchaves_libretro/cmake/streetchaves.cmake)
 endif()
 
 if (PORTS_USE_RETROARCH)
