@@ -102,7 +102,11 @@ file(GLOB chavo8_lifted "${CHAVO8_LIFTED}/x86v1*.c")
 list(APPEND chavo8_files ${chavo8_lifted})
 
 if (EMSCRIPTEN)
-    add_library(chavo8_libretro STATIC "${chavo8_files}")
+    # RetroArch's web player links one archive: the games' and dmc_unrar's
+    # objects go into it
+    add_library(chavo8_libretro STATIC "${chavo8_files}"
+        $<TARGET_OBJECTS:chavo8_game> $<TARGET_OBJECTS:chavo8_unrar>)
+    set_target_properties(chavo8_libretro PROPERTIES OUTPUT_NAME "chavo8_libretro_emscripten")
 else()
     add_library(chavo8_libretro SHARED "${chavo8_files}")
     target_link_options(chavo8_libretro PRIVATE -Wl,--no-undefined)
@@ -119,3 +123,31 @@ set_target_properties(chavo8_libretro PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
+
+if (EMSCRIPTEN)
+    # the web build: a launcher (www/index.html) whose Play opens the game
+    # page (www/play.html) on the game as hosted, or on one's own copy
+    set(CHAVO8_CONTENT_URL
+        "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/abandonwares/StreetChaves_1.5A.rar"
+        CACHE STRING "the game the web build's Play and Download fetch")
+    set(chavo8_www "${PORTS_DIST}/chavo8")
+    set(chavo8_www_outputs "")
+    foreach(copy "${CHAVO8_DIR}/www/style.css=style.css" "${DOPO_DIR}/www/sw.js=sw.js")
+        string(REPLACE "=" ";" copy "${copy}")
+        list(GET copy 0 source)
+        list(GET copy 1 file)
+        add_custom_command(OUTPUT "${chavo8_www}/${file}"
+            COMMAND "${CMAKE_COMMAND}" -E copy "${source}" "${chavo8_www}/${file}"
+            DEPENDS "${source}")
+        list(APPEND chavo8_www_outputs "${chavo8_www}/${file}")
+    endforeach()
+    include("${DOPO_DIR}/cmake/www.cmake")
+    dopo_www_page("${chavo8_www}/index.html" "${CHAVO8_DIR}/www/index.html"
+        "title=Street Chaves"
+        "description=Street Chaves 1.5A, the 2004 fan-made fighting game of the vila, in the browser."
+        "root=../" "back=../" "source=/tree/main/chavo8_libretro"
+        "title_before=Street " "title_accent=Chaves" "content=${CHAVO8_CONTENT_URL}")
+    dopo_www_page("${chavo8_www}/play.html" "${CHAVO8_DIR}/www/play.html" "content=${CHAVO8_CONTENT_URL}")
+    list(APPEND chavo8_www_outputs "${chavo8_www}/index.html" "${chavo8_www}/play.html")
+    add_custom_target(chavo8_www ALL DEPENDS ${chavo8_www_outputs})
+endif()

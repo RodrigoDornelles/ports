@@ -38,10 +38,14 @@ if (EMSCRIPTEN)
     if (DOPO_USE_BALATRO_WEB_PATCH)
         set(dopo_home_balatro "balatro=1")
     endif()
+    set(dopo_home_chavo8 "")
+    if (PORTS_USE_CHAVO8_LIBRETRO)
+        set(dopo_home_chavo8 "chavo8=1")
+    endif()
     dopo_www_page("${PORTS_DIST}/index.html" "${DOPO_DIR}/www/index.html"
         "title=Dornelles Ports"
         "description=Classic games ported to the browser and to TV boxes, alone or with friends."
-        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro}
+        "title_before=Dornelles " "title_accent=Ports" ${dopo_home_balatro} ${dopo_home_chavo8}
         "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/android-chrome-512x512.png"
         "card=summary")
     add_custom_target(dopo_www ALL DEPENDS "${PORTS_DIST}/index.html")

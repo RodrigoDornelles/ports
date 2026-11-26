@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Street Chaves</title>
+  <meta name="description" content="Play Street Chaves 1.5A in the browser.">
+  <meta name="chavo8:content" content="{{content}}">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="play">
+  <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+
+  <!-- touch screens: the stick, the four buttons and Start and Select over
+       the game (gamepadzilla presses the keys RetroArch maps to the RetroPad) -->
+  <div class="touch" aria-hidden="true">
+    <canvas class="gpz-joy touch-stick" width="128" height="128"
+            data-gpz-bind="ArrowUp ArrowLeft ArrowDown ArrowRight"></canvas>
+    <canvas class="gpz-btn touch-a" width="64" height="64" data-gpz-bind="KeyX"
+            data-gpz-color="#88888880" data-gpz-color-action="#d6402bc0"></canvas>
+    <canvas class="gpz-btn touch-b" width="64" height="64" data-gpz-bind="KeyZ"
+            data-gpz-color="#88888880" data-gpz-color-action="#e8b04ac0"></canvas>
+    <canvas class="gpz-btn touch-x" width="64" height="64" data-gpz-bind="KeyS"
+            data-gpz-color="#88888880" data-gpz-color-action="#4a9be8c0"></canvas>
+    <canvas class="gpz-btn touch-y" width="64" height="64" data-gpz-bind="KeyA"
+            data-gpz-color="#88888880" data-gpz-color-action="#5ac04ac0"></canvas>
+    <button type="button" class="touch-key touch-select" data-code="ShiftRight" data-key="Shift" data-key-code="16">SELECT</button>
+    <button type="button" class="touch-key touch-start" data-code="Enter" data-key="Enter" data-key-code="13">START</button>
+  </div>
+
+  <div id="rotate" role="alert">
+    <svg class="phone" viewBox="0 0 48 48" width="64" height="64" aria-hidden="true"><rect x="14" y="4" width="20" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="38" r="2" fill="currentColor"/></svg>
+    <p>Turn your phone sideways to play.</p>
+  </div>
+
+  <div id="loading">
+    <p id="status">Loading Street Chaves...</p>
+  </div>
+
+  <script src="../retroarch/gamepadzilla.js" defer></script>
+
+  <script type="module">
+    /* the game is kept on this device for the next start; the first time,
+     * the worker also takes what loaded before it */
+    navigator.serviceWorker?.register('sw.js')
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => registration.active.postMessage({
+        cache: [location.href.split('#')[0],
+                ...performance.getEntriesByType('resource').map((entry) => entry.name)],
+      }))
+      .catch((e) => console.warn('[chavo8] cache:', e));
+
+    import { play, hashParams, coreOptions } from '../retroarch/player.js';
+
+    /* RetroArch hears keys on the canvas; gamepadzilla's and the buttons'
+     * are made up on window, so they go on to the canvas, not bubbling */
+    const canvas = document.getElementById('canvas');
+    const press = (type, code, key, keyCode) => canvas.dispatchEvent(
+      new KeyboardEvent(type, { code, key, keyCode, which: keyCode, bubbles: false, cancelable: true }));
+    for (const type of ['keydown', 'keyup'])
+      addEventListener(type, (event) => {
+        if (!event.isTrusted) press(type, event.code, event.key, event.keyCode);
+      });
+    for (const button of document.querySelectorAll('.touch-key')) {
+      const { code, key, keyCode } = button.dataset;
+      button.addEventListener('pointerdown', (event) => { event.preventDefault(); press('keydown', code, key, Number(keyCode)); });
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave'])
+        button.addEventListener(type, () => press('keyup', code, key, Number(keyCode)));
+    }
+
+    const loading = document.getElementById('loading');
+    const status = document.getElementById('status');
+    try {
+      await play({
+        canvas,
+        core: 'chavo8_libretro.js',
+        content: document.querySelector('meta[name="chavo8:content"]').content,
+        options: coreOptions(),
+        nick: hashParams().get('nick') || '',
+        progress: (loaded, total) => {
+          if (total) status.textContent = `Loading Street Chaves... ${Math.min(100, Math.round(loaded * 100 / total))}%`;
+        },
+      });
+      loading.remove();
+    } catch (e) {
+      console.error(e);
+      status.classList.add('error');
+      status.textContent = `Could not start: ${e.message ?? e}`;
+    }
+  </script>
+</body>
+</html>

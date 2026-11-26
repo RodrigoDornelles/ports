@@ -21,6 +21,8 @@ dump Chaves.exe library/game/assembly.tar.xz 473728-48dd98 48edfc-4905a8=desenha
   49a3f4-49cd34=desenhaanimacoes 48e5fc-48e69c=circulo 48e69c-48e720=circulopintado 4a44b3-4ab259=tela7
 ```
 
+In the browser (the `wasm` preset), the core is linked into RetroArch's web player: `dist/chavo8/` has the launcher (`www/index.html`: Play with the player name, the resolution and the core options, Download) and the game page (`www/play.html`), which plays the game as hosted (`CHAVO8_CONTENT_URL`).
+
 The settings live in `chavo8.ini` of the frontend's save folder; without it, a `Chaves.dat` of the original beside the exe is read, as are the unlock files (`Churros.dat`, `Satanas.dat`, `SC01.dat`...).
 
 The font is [Comic Relief](https://github.com/loudifier/Comic-Relief) (OFL), metric-compatible with the Comic Sans MS the game took from Windows.

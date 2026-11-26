@@ -78,7 +78,7 @@ void retro_set_environment(retro_environment_t cb)
     if (cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
         log_cb = log.log;
     static const struct retro_variable vars[] = {
-        { "chavo8_viewer", "Asset viewer instead of the game; disabled|enabled" },
+        { "chavo8-viewer", "Asset viewer instead of the game; disabled|enabled" },
         { NULL, NULL },
     };
     cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
@@ -200,7 +200,7 @@ bool retro_load_game(const struct retro_game_info *game)
     environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
     config_open(save_dir);
     chavo8_v1_create();
-    struct retro_variable var = { "chavo8_viewer", NULL };
+    struct retro_variable var = { "chavo8-viewer", NULL };
     viewer = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value && !strcmp(var.value, "enabled");
     interval = INTERVAL_MS;
     describe();
