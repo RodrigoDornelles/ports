@@ -131,6 +131,8 @@ function contentPath(line) {
  * under their own names and, in a playlist, are listed at its end.
  */
 async function fetchFiles(content, more, progress) {
+  if (content instanceof File)
+    return [{ path: contentPath(content.name), data: new Uint8Array(await content.arrayBuffer()) }];
   const url = new URL(content, location.href);
   const name = decodeURIComponent(url.pathname.split('/').pop());
   const m3u = /\.m3u$/i.test(name);
@@ -192,7 +194,8 @@ function sync(FS, populate) {
  *
  * core:     URL of <core>_libretro.js
  * content:  URL of the content, written under its own file name; an m3u
- *           playlist brings the files it lists, at their relative paths
+ *           playlist brings the files it lists, at their relative paths;
+ *           or a File (one picked on the page), written under its name
  * playlist: URLs of more files, written next to the content under their
  *           own names and added to the end of an m3u content (optional)
  * nick:     netplay nickname

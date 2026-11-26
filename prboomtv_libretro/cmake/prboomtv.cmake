@@ -461,7 +461,7 @@ if (EMSCRIPTEN)
         --partials "${PRBOOMTV_DIR}/www/partials"
         "title=PrBoomTV"
         "description=Doom and friends in the browser, alone or with friends."
-        "root=../" "back=../" "source=/tree/main/prboomtv_libretro"
+        "root=../" "back=../"
         "title_before=PrBoom" "title_accent=TV" "online=1" "midi=${PRBOOMTV_MIDI_URL}"
         "image=https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/sharewares/banners/doom1.png")
     list(APPEND prboomtv_www_outputs "${prboomtv_www}/index.html")

@@ -206,6 +206,10 @@ select {
 .go:disabled { opacity: 0.45; cursor: not-allowed; }
 /* a bar with nothing but its button */
 .bar.solo { justify-content: center; }
+/* fields of one width, the room left between them and the button */
+.bar.even > .field { flex: 0 1 150px; }
+.bar.even > .field.grow { flex-grow: 1; }
+.bar.even > .go { flex-grow: 0; }
 .bar.solo .go { flex-grow: 0; margin-left: 0; }
 /* a second button after the first: outlined, beside it */
 .go + .go { margin-left: 0; border: 1px solid var(--line); background: var(--raised); color: var(--text); }
@@ -405,6 +409,6 @@ input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(-
   .games { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .go { width: 100%; margin-left: 0; }
   /* each line of the bar filled, the fields too */
-  .bar > .field, .bar > .field.wide { flex-grow: 1; }
+  .bar > .field, .bar > .field.wide, .bar.even > .field { flex-grow: 1; }
   .ports { grid-template-columns: minmax(0, 1fr); }
 }

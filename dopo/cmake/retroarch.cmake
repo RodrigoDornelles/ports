@@ -117,3 +117,6 @@ configure_file("${CMAKE_SOURCE_DIR}/dopo/supabase/lobby.json" "${PORTS_DIST}/ret
 if (TARGET prboomtv_libretro)
     retroarch_web_player(prboomtv_libretro prboomtv "${PORTS_DIST}/prboomtv")
 endif()
+if (TARGET streetchaves_libretro)
+    retroarch_web_player(streetchaves_libretro streetchaves "${PORTS_DIST}/streetchaves")
+endif()
