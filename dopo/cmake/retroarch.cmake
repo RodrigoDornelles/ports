@@ -74,19 +74,20 @@ LDFLAGS +=${retroarch_js_flags} -lidbfs.js
 cmake_host_system_information(RESULT retroarch_jobs QUERY NUMBER_OF_LOGICAL_CORES)
 
 # builds <name>_libretro.js and .wasm with core_target linked in, into
-# output_dir
+# output_dir; the players share one tree and its objects, so they build one
+# after another, each linking its own core's archive
+set_property(GLOBAL PROPERTY retroarch_last_player "")
 function(retroarch_web_player core_target name output_dir)
     set(outputs "${output_dir}/${name}_libretro.js" "${output_dir}/${name}_libretro.wasm")
+    get_property(previous GLOBAL PROPERTY retroarch_last_player)
     add_custom_command(
         OUTPUT ${outputs}
         ${retroarch_sync_commands}
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "$<TARGET_FILE:${core_target}>" "${RETROARCH_TREE}/libretro_emscripten.a"
         COMMAND "${CMAKE_COMMAND}" -E env
             "CC=${EMSCRIPTEN_ROOT_PATH}/emcc" "CXX=${EMSCRIPTEN_ROOT_PATH}/em++"
             "LD=${EMSCRIPTEN_ROOT_PATH}/emcc" "AR=${EMSCRIPTEN_ROOT_PATH}/emar"
             make -C "${RETROARCH_TREE}" -f "${retroarch_makefile}" -j${retroarch_jobs}
-                LIBRETRO=${name}
+                LIBRETRO=${name} "libretro_new=$<TARGET_FILE:${core_target}>"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
         COMMAND "${CMAKE_COMMAND}" -E copy
             "${RETROARCH_TREE}/${name}_libretro.js" "${RETROARCH_TREE}/${name}_libretro.wasm"
@@ -96,6 +97,10 @@ function(retroarch_web_player core_target name output_dir)
         COMMENT "retroarch: web player with ${name}"
         VERBATIM)
     add_custom_target(retroarch_${name} ALL DEPENDS ${outputs})
+    if (previous)
+        add_dependencies(retroarch_${name} ${previous})
+    endif()
+    set_property(GLOBAL PROPERTY retroarch_last_player retroarch_${name})
 endfunction()
 
 # what every core's pages share: the player
