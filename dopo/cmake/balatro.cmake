@@ -50,7 +50,7 @@ dopo_nim_js(balatro_patchs "${DOPO_DIR}/scripts/patchs.nim" "${balatro_www}/patc
 dopo_www_page("${balatro_www}/index.html" "${DOPO_DIR}/www/balatro.html"
     "title=Balatro"
     "description=Your own Balatro in the browser, or patched lighter for TV boxes and handhelds."
-    "root=../" "back=../" "source=/tree/main/dopo/games/balatro"
+    "root=../" "back=../"
     "title_before=Bal" "title_accent=a" "title_after=tro"
     "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/dopo/assets/balatro/320x200.png")
 list(APPEND balatro_outputs "${balatro_www}/index.html")

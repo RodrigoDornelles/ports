@@ -55,6 +55,15 @@
           </label>
         </div>
       </details>
+
+      <fieldset class="games">
+        <legend class="sr-only">Game</legend>
+        <label class="game">
+          <input type="radio" name="game" value="1.5a" checked>
+          <img class="banner" src="banner.png" alt="">
+          <strong>Street Chaves 1.5A</strong>
+        </label>
+      </fieldset>
     </form>
 
     <form id="pack" role="tabpanel" aria-labelledby="tab-download" hidden>
@@ -77,6 +86,8 @@
   </main>
 
   <script type="module">
+    import { watchLobby } from '../retroarch/player.js';
+
     const CONTENT = '{{content}}';
     const form = document.getElementById('launch');
     const KEY = 'chavo8.launch';
@@ -122,6 +133,21 @@
       }
       say.textContent = 'The core downloads are not available yet.';
       say.classList.add('error');
+    });
+
+    /* who is playing: the rooms the core's hosts announce */
+    const online = document.getElementById('online');
+    const onlineText = document.getElementById('online-text');
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    watchLobby('chavo8', (rooms) => {
+      const players = rooms.reduce((sum, room) => sum + room.players, 0);
+      online.classList.toggle('live', players > 0);
+      onlineText.textContent = players
+        ? `${plural(players, 'player', 'players')} online in ${plural(rooms.length, 'room', 'rooms')}`
+        : 'No rooms open right now';
+    }).catch((e) => {
+      console.warn('[chavo8] lobby:', e);
+      online.hidden = true;
     });
   </script>
 </body>

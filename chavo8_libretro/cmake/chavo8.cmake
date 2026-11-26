@@ -126,13 +126,14 @@ set_target_properties(chavo8_libretro PROPERTIES
 
 if (EMSCRIPTEN)
     # the web build: a launcher (www/index.html) whose Play opens the game
-    # page (www/play.html) on the game as hosted, or on one's own copy
+    # page (www/play.html) on the game as hosted
     set(CHAVO8_CONTENT_URL
         "https://raw.githubusercontent.com/RodrigoDornelles/RodrigoDornelles/refs/heads/master/abandonwares/StreetChaves_1.5A.rar"
         CACHE STRING "the game the web build's Play and Download fetch")
     set(chavo8_www "${PORTS_DIST}/chavo8")
     set(chavo8_www_outputs "")
-    foreach(copy "${CHAVO8_DIR}/www/style.css=style.css" "${DOPO_DIR}/www/sw.js=sw.js")
+    foreach(copy "${CHAVO8_DIR}/www/style.css=style.css" "${DOPO_DIR}/www/sw.js=sw.js"
+            "${CHAVO8_DIR}/assets/320x200.png=banner.png")
         string(REPLACE "=" ";" copy "${copy}")
         list(GET copy 0 source)
         list(GET copy 1 file)
@@ -145,8 +146,9 @@ if (EMSCRIPTEN)
     dopo_www_page("${chavo8_www}/index.html" "${CHAVO8_DIR}/www/index.html"
         "title=Street Chaves"
         "description=Street Chaves 1.5A, the 2004 fan-made fighting game of the vila, in the browser."
-        "root=../" "back=../" "source=/tree/main/chavo8_libretro"
-        "title_before=Street " "title_accent=Chaves" "content=${CHAVO8_CONTENT_URL}")
+        "root=../" "back=../"
+        "title_before=Street " "title_accent=Chaves" "online=1" "content=${CHAVO8_CONTENT_URL}"
+        "image=https://raw.githubusercontent.com/RodrigoDornelles/ports/refs/heads/main/chavo8_libretro/assets/320x200.png")
     dopo_www_page("${chavo8_www}/play.html" "${CHAVO8_DIR}/www/play.html" "content=${CHAVO8_CONTENT_URL}")
     list(APPEND chavo8_www_outputs "${chavo8_www}/index.html" "${chavo8_www}/play.html")
     add_custom_target(chavo8_www ALL DEPENDS ${chavo8_www_outputs})
