@@ -9,6 +9,13 @@
       }
     },
     {
+      "name": "aarch64",
+      "binaryDir": "${sourceDir}/build_aarch64",
+      "cacheVariables": {
+        "TARGET": "aarch64-linux-gnu.2.17"
+      }
+    },
+    {
       "name": "wasm",
       "binaryDir": "${sourceDir}/build_wasm",
       "cacheVariables": {
